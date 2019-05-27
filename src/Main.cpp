@@ -39,8 +39,10 @@
 ****************************************************************************/
 
 #include <QApplication>
+#include <QFile>
 #include <QStyleFactory>
 #include <QDebug>
+
 #include "libs/dropt/droptxx.hpp"
 
 #include "CodeEditor.h"
@@ -58,29 +60,17 @@ int main(int argc, char * argv[])
 {
   Q_INIT_RESOURCE(mdi);
 
-  /* setting up a palette for a dark theme */
-  // QPalette darkPalette;
-  // darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-  // darkPalette.setColor(QPalette::WindowText, Qt::white);
-  // darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-  // darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-  // darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-  // darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-  // darkPalette.setColor(QPalette::Text, Qt::white);
-  // darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-  // darkPalette.setColor(QPalette::ButtonText, Qt::white);
-  // darkPalette.setColor(QPalette::BrightText, Qt::red);
-  // darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-  // darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-  // darkPalette.setColor(QPalette::HighlightedText, Qt::black);
+  // QFile styleFile(":/qss/DarkMonokai.qss");
+  QFile styleFile(":/qss/QDarkStyle.qss");
+  styleFile.open(QFile::ReadOnly);
+  QString styleSheet(styleFile.readAll());
 
   /* initializing the Qt application */
   QApplication application(argc, argv);
   application.setApplicationName(TiledEditor::m_applicationName);
   application.setApplicationVersion(TiledEditor::m_applicationVersion);
-  application.setStyle("Fusion");
-  // application.setPalette(darkPalette);
-  // application.setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; border: 1px solid white; }");
+  application.setStyle("Plastique");
+  application.setStyleSheet(styleSheet);
 
   /* setting up argument parsing */
   bool showHelp = false;
