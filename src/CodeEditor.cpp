@@ -38,6 +38,8 @@
 **
 ****************************************************************************/
 
+#include <iostream>
+
 // #include <QtDebug>
 #include <QtWidgets>
 #include <QKeySequence>
@@ -194,17 +196,17 @@ void TiledEditor::createConsole()
   QWidget * new_widget = new QWidget(m_consoleDock);
   QGridLayout * layout = new QGridLayout(new_widget);
 
-  m_consoleOutput = new QTextEdit();
+  m_consoleOutput = new QTextEdit(new_widget);
   m_consoleOutput->setReadOnly(true);
   printToConsole("=== Welcome to Tiling Text Editor v0.0 ===\n");
   // qDebug() << tr("=== Welcome to Tiling Text Editor 0 ===");
   layout->addWidget(m_consoleOutput, 0, 0, 1, -1);
 
-  m_consoleInput = new QLineEdit();
+  m_consoleInput = new QLineEdit(new_widget);
   layout->addWidget(m_consoleInput, 1, 0, 1, 1);
   connect(m_consoleInput, SIGNAL(returnPressed()), this, SLOT(triggerExecConsole()));
 
-  QPushButton * enterButton = new QPushButton(tr("Enter"));
+  QPushButton * enterButton = new QPushButton(tr("Enter"), new_widget);
   layout->addWidget(enterButton, 1, 1, 1, 1);
   connect(enterButton, SIGNAL(clicked()), this, SLOT(triggerExecConsole()));
 
@@ -563,8 +565,11 @@ bool TiledEditor::saveFile(const QString & filepath, const QString * new_filepat
 
 MdiChild * TiledEditor::createMdiChild()
 {
-  MdiChild * child = new MdiChild;
-  m_mdiArea->addSubWindow(child, Qt::FramelessWindowHint);
+  MdiChild * child = new MdiChild(m_mdiArea);
+  QMdiSubWindow * window = m_mdiArea->addSubWindow(child, Qt::FramelessWindowHint);
+  window->setAttribute(Qt::WA_DeleteOnClose);
+  child->setWindow(window);
+  // std::cout << m_mdiArea << ' ' << window->parentWidget() << std::endl;  // debug
 
 #ifndef QT_NO_CLIPBOARD
   connect(child, SIGNAL(copyAvailable(bool)), m_cutAction, SLOT(setEnabled(bool)));
@@ -730,4 +735,3 @@ void TiledEditor::handleSystemMessage(QtMsgType type, const QMessageLogContext &
 
   printToConsole(fmt_msg);
 }
-

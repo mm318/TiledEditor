@@ -51,10 +51,11 @@ class MdiChild : public QDialog
   Q_OBJECT
 
 public:
-  MdiChild();
+  MdiChild(QWidget * parent = nullptr);
 
   // int getID() const { return m_id; }
   const QString & getID() const { return getCurrentFile(); }
+  void setWindow(QMdiSubWindow * window) { m_window = window; }
 
   void newFile(const QString * filepath);
   bool loadFile(const QString & filepath);
@@ -69,6 +70,10 @@ public:
   QString getUserFriendlyCurrentFile() const;
 
 protected:
+  void keyPressEvent(QKeyEvent * event) override;
+  void keyReleaseEvent(QKeyEvent * event) override;
+  void mousePressEvent(QMouseEvent * event) override;
+  void mouseMoveEvent(QMouseEvent * event) override;
   void closeEvent(QCloseEvent * event) override;
 
 private:
@@ -79,12 +84,16 @@ private slots:
   void documentWasModified();
 
 private:
+  QMdiSubWindow * m_window;
   QVBoxLayout * m_layout;
   QTextEdit * m_document;
 
   // int m_id;
-  QString m_currentFile;
   bool m_isUntitled;
+  QString m_currentFile;
+
+  bool m_moving;
+  QPoint m_oldPos;
 };
 
 #endif

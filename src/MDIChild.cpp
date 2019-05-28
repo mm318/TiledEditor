@@ -43,15 +43,18 @@
 #include "MDIChild.h"
 
 
-MdiChild::MdiChild()
+MdiChild::MdiChild(QWidget * parent) :
+  QDialog(parent),
+  m_window(nullptr),
+  m_isUntitled(true),
+  m_moving(false)
 {
-  setAttribute(Qt::WA_DeleteOnClose);
   setSizeGripEnabled(true);
   setStyleSheet("background-color:#19232D;");
 
   m_layout = new QVBoxLayout(this);
   m_document = new QTextEdit(this);
-  
+
   // To remove any space between the borders and the QSizeGrip...
   m_layout->setContentsMargins(QMargins());
   // and between the other widget and the QSizeGrip
@@ -62,8 +65,6 @@ MdiChild::MdiChild()
 
   m_document->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   m_document->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
-
-  m_isUntitled = true;
 }
 
 
@@ -149,6 +150,40 @@ bool MdiChild::saveFile(const QString & filepath)
 }
 
 
+void MdiChild::keyPressEvent(QKeyEvent * event)
+{
+  if (event->key() == Qt::Key_Escape) {
+    /* do nothing */
+  } else if (event->key() == Qt::Key_Alt) {
+    m_moving = true;
+  } else {
+    QDialog::keyPressEvent(event);
+  }
+}
+
+void MdiChild::keyReleaseEvent(QKeyEvent * event)
+{
+  if (event->key() == Qt::Key_Alt) {
+    m_moving = false;
+  }
+}
+
+void MdiChild::mousePressEvent(QMouseEvent * event)
+{
+  if (m_moving) {
+    m_oldPos = event->globalPos();
+  }
+}
+
+void MdiChild::mouseMoveEvent(QMouseEvent * event)
+{
+  if (m_moving) {
+    const QPoint delta = event->globalPos() - m_oldPos;
+    m_window->move(m_window->x() + delta.x(), m_window->y() + delta.y());
+    m_oldPos = event->globalPos();
+  }
+}
+
 void MdiChild::closeEvent(QCloseEvent * event)
 {
   if (maybeSave()) {
@@ -170,7 +205,7 @@ bool MdiChild::maybeSave()
   if (m_document->document()->isModified()) {
     QMessageBox::StandardButton ret;
     ret = QMessageBox::warning(this, tr("MDI"), tr("'%1' has been modified.\n"
-                               "Do you want to save your changes?").arg(getUserFriendlyCurrentFile()),
+                                                   "Do you want to save your changes?").arg(getUserFriendlyCurrentFile()),
                                QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
 
     if (ret == QMessageBox::Save) {
@@ -192,4 +227,3 @@ void MdiChild::setCurrentFile(const QString & filepath)
   setWindowModified(false);
   setWindowTitle(getUserFriendlyCurrentFile() + "[*]");
 }
-

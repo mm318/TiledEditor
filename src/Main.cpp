@@ -88,9 +88,9 @@ int main(int argc, char * argv[])
   /* parsing arguments */
   char ** args_rest = NULL;
   if (argc > 0) {
-    // qDebug() << argv[0]; // debug
+    // qDebug() << argv[0];     // debug
     QTextStream cmdline_out(stdout);
-    cmdline_out << argv[0]; // debug
+    // cmdline_out << argv[0];  // debug
     args_rest = droptContext.parse(&argv[1]);
     if (droptContext.get_error() != dropt_error_none) {
       // qDebug() << TiledEditor::m_applicationName << ": " << droptContext.get_error_message() << endl;
@@ -118,4 +118,3 @@ int main(int argc, char * argv[])
 
   return application.exec();
 }
-
