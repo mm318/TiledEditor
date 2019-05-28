@@ -46,6 +46,23 @@
 MdiChild::MdiChild()
 {
   setAttribute(Qt::WA_DeleteOnClose);
+  setSizeGripEnabled(true);
+  setStyleSheet("background-color:#19232D;");
+
+  m_layout = new QVBoxLayout(this);
+  m_document = new QTextEdit(this);
+  
+  // To remove any space between the borders and the QSizeGrip...
+  m_layout->setContentsMargins(QMargins());
+  // and between the other widget and the QSizeGrip
+  m_layout->setSpacing(0);
+  m_layout->addWidget(m_document);
+  // The QSizeGrip position (here Bottom Right Corner) determines its orientation too
+  // m_layout->addWidget(new QSizeGrip(this), 0, Qt::AlignBottom | Qt::AlignRight);
+
+  m_document->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+  m_document->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+
   m_isUntitled = true;
 }
 
@@ -63,7 +80,7 @@ void MdiChild::newFile(const QString * filepath)
   m_isUntitled = true;
   setWindowTitle(m_currentFile + "[*]");
   setWindowModified(true);
-  connect(document(), SIGNAL(contentsChanged()), this, SLOT(documentWasModified()));
+  connect(m_document->document(), SIGNAL(contentsChanged()), this, SLOT(documentWasModified()));
 }
 
 
@@ -77,12 +94,12 @@ bool MdiChild::loadFile(const QString & filepath)
 
   QTextStream in(&file);
   QApplication::setOverrideCursor(Qt::WaitCursor);
-  setPlainText(in.readAll());
+  m_document->setPlainText(in.readAll());
   QApplication::restoreOverrideCursor();
 
   setCurrentFile(filepath);
 
-  connect(document(), SIGNAL(contentsChanged()), this, SLOT(documentWasModified()));
+  connect(m_document->document(), SIGNAL(contentsChanged()), this, SLOT(documentWasModified()));
 
   return true;
 }
@@ -124,7 +141,7 @@ bool MdiChild::saveFile(const QString & filepath)
 
   QTextStream out(&file);
   QApplication::setOverrideCursor(Qt::WaitCursor);
-  out << toPlainText();
+  out << m_document->toPlainText();
   QApplication::restoreOverrideCursor();
 
   setCurrentFile(filepath);
@@ -144,13 +161,13 @@ void MdiChild::closeEvent(QCloseEvent * event)
 
 void MdiChild::documentWasModified()
 {
-  setWindowModified(document()->isModified());
+  setWindowModified(m_document->document()->isModified());
 }
 
 
 bool MdiChild::maybeSave()
 {
-  if (document()->isModified()) {
+  if (m_document->document()->isModified()) {
     QMessageBox::StandardButton ret;
     ret = QMessageBox::warning(this, tr("MDI"), tr("'%1' has been modified.\n"
                                "Do you want to save your changes?").arg(getUserFriendlyCurrentFile()),
@@ -171,7 +188,7 @@ void MdiChild::setCurrentFile(const QString & filepath)
 {
   m_currentFile = QFileInfo(filepath).canonicalFilePath();
   m_isUntitled = false;
-  document()->setModified(false);
+  m_document->document()->setModified(false);
   setWindowModified(false);
   setWindowTitle(getUserFriendlyCurrentFile() + "[*]");
 }

@@ -91,7 +91,7 @@ public:
   bool stopSessionLog();
 
 protected:
-  void closeEvent(QCloseEvent * event);
+  void closeEvent(QCloseEvent * event) override;
 
 private:
   // helper functions during initialization

@@ -64,7 +64,8 @@ TiledEditor::TiledEditor() : m_logFile(NULL)
 {
   createConsole();
 
-  m_mdiArea = new QMdiArea;
+  m_mdiArea = new QMdiArea(this);
+  m_mdiArea->setBackground(QBrush("#19232D"));
   m_mdiArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   m_mdiArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
   setCentralWidget(m_mdiArea);
@@ -82,7 +83,7 @@ TiledEditor::TiledEditor() : m_logFile(NULL)
 
   // then create widgets that associate with actions
   createMenus();
-  createToolBars();
+  // createToolBars();
   createStatusBar();
 
   setWindowTitle(tr("Tiling Text Editor"));
@@ -434,7 +435,7 @@ void TiledEditor::triggerUpdateMenus()
   m_separatorAction->setVisible(hasMdiChild);
 
 #ifndef QT_NO_CLIPBOARD
-  bool hasSelection = (getActiveMdiChild() && getActiveMdiChild()->textCursor().hasSelection());
+  bool hasSelection = (getActiveMdiChild() && getActiveMdiChild()->hasSelection());
   m_cutAction->setEnabled(hasSelection);
   m_copyAction->setEnabled(hasSelection);
 #endif
@@ -563,7 +564,7 @@ bool TiledEditor::saveFile(const QString & filepath, const QString * new_filepat
 MdiChild * TiledEditor::createMdiChild()
 {
   MdiChild * child = new MdiChild;
-  m_mdiArea->addSubWindow(child);
+  m_mdiArea->addSubWindow(child, Qt::FramelessWindowHint);
 
 #ifndef QT_NO_CLIPBOARD
   connect(child, SIGNAL(copyAvailable(bool)), m_cutAction, SLOT(setEnabled(bool)));

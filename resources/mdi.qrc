@@ -6,7 +6,62 @@
     <file>images/open.png</file>
     <file>images/paste.png</file>
     <file>images/save.png</file>
-    <file>qss/DarkMonokai.qss</file>
+
     <file>qss/QDarkStyle.qss</file>
+    <file>qss/branch_closed-on.png</file>
+    <file>qss/branch_closed.png</file>
+    <file>qss/branch_open-on.png</file>
+    <file>qss/branch_open.png</file>
+    <file>qss/checkbox_checked@2x.png</file>
+    <file>qss/checkbox_checked_disabled@2x.png</file>
+    <file>qss/checkbox_checked_disabled.png</file>
+    <file>qss/checkbox_checked_focus@2x.png</file>
+    <file>qss/checkbox_checked_focus.png</file>
+    <file>qss/checkbox_checked.png</file>
+    <file>qss/checkbox_indeterminate@2x.png</file>
+    <file>qss/checkbox_indeterminate_disabled@2x.png</file>
+    <file>qss/checkbox_indeterminate_disabled.png</file>
+    <file>qss/checkbox_indeterminate_focus@2x.png</file>
+    <file>qss/checkbox_indeterminate_focus.png</file>
+    <file>qss/checkbox_indeterminate.png</file>
+    <file>qss/checkbox_unchecked@2x.png</file>
+    <file>qss/checkbox_unchecked_disabled@2x.png</file>
+    <file>qss/checkbox_unchecked_disabled.png</file>
+    <file>qss/checkbox_unchecked_focus@2x.png</file>
+    <file>qss/checkbox_unchecked_focus.png</file>
+    <file>qss/checkbox_unchecked.png</file>
+    <file>qss/close-hover.png</file>
+    <file>qss/close.png</file>
+    <file>qss/close-pressed.png</file>
+    <file>qss/down_arrow_disabled.png</file>
+    <file>qss/down_arrow.png</file>
+    <file>qss/Hmovetoolbar.png</file>
+    <file>qss/Hsepartoolbar.png</file>
+    <file>qss/left_arrow_disabled.png</file>
+    <file>qss/left_arrow.png</file>
+    <file>qss/radio_checked@2x.png</file>
+    <file>qss/radio_checked_disabled@2x.png</file>
+    <file>qss/radio_checked_disabled.png</file>
+    <file>qss/radio_checked_focus@2x.png</file>
+    <file>qss/radio_checked_focus.png</file>
+    <file>qss/radio_checked.png</file>
+    <file>qss/radio_unchecked@2x.png</file>
+    <file>qss/radio_unchecked_disabled@2x.png</file>
+    <file>qss/radio_unchecked_disabled.png</file>
+    <file>qss/radio_unchecked_focus@2x.png</file>
+    <file>qss/radio_unchecked_focus.png</file>
+    <file>qss/radio_unchecked.png</file>
+    <file>qss/right_arrow_disabled.png</file>
+    <file>qss/right_arrow.png</file>
+    <file>qss/sizegrip.png</file>
+    <file>qss/stylesheet-branch-end.png</file>
+    <file>qss/stylesheet-branch-more.png</file>
+    <file>qss/stylesheet-vline.png</file>
+    <file>qss/transparent.png</file>
+    <file>qss/undock.png</file>
+    <file>qss/up_arrow_disabled.png</file>
+    <file>qss/up_arrow.png</file>
+    <file>qss/Vmovetoolbar.png</file>
+    <file>qss/Vsepartoolbar.png</file>
 </qresource>
 </RCC>

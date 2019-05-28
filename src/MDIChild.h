@@ -41,9 +41,12 @@
 #ifndef MDICHILD_H
 #define MDICHILD_H
 
+#include <QDialog>
+#include <QVBoxLayout>
 #include <QTextEdit>
 
-class MdiChild : public QTextEdit
+
+class MdiChild : public QDialog
 {
   Q_OBJECT
 
@@ -55,12 +58,18 @@ public:
 
   void newFile(const QString * filepath);
   bool loadFile(const QString & filepath);
-  const QString & getCurrentFile() const { return m_currentFile; }
-  QString getUserFriendlyCurrentFile() const;
   bool saveFile(const QString & filepath);
 
+  void cut() { m_document->cut(); }
+  void copy() { m_document->copy(); }
+  void paste() { m_document->paste(); }
+
+  bool hasSelection() const { return m_document->textCursor().hasSelection(); }
+  const QString & getCurrentFile() const { return m_currentFile; }
+  QString getUserFriendlyCurrentFile() const;
+
 protected:
-  void closeEvent(QCloseEvent * event);
+  void closeEvent(QCloseEvent * event) override;
 
 private:
   bool maybeSave();
@@ -70,6 +79,9 @@ private slots:
   void documentWasModified();
 
 private:
+  QVBoxLayout * m_layout;
+  QTextEdit * m_document;
+
   // int m_id;
   QString m_currentFile;
   bool m_isUntitled;

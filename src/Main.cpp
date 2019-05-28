@@ -69,7 +69,7 @@ int main(int argc, char * argv[])
   QApplication application(argc, argv);
   application.setApplicationName(TiledEditor::m_applicationName);
   application.setApplicationVersion(TiledEditor::m_applicationVersion);
-  application.setStyle("Plastique");
+  // application.setStyle("Plastique");
   application.setStyleSheet(styleSheet);
 
   /* setting up argument parsing */

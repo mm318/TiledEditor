@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
-set(QT_MIN_VERSION "5.4.0")
+
+set(CMAKE_CXX_STANDARD 11)
+set(QT_MIN_VERSION 5.4.0)
 
 include_directories(${Qt5Widgets_INCLUDE_DIRS})
 add_definitions(${Qt5Widgets_DEFINITIONS})
