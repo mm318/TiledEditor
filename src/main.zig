@@ -1,6 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
-
 const dvui = @import("dvui");
 const SDLBackend = @import("sdl3gpu-backend");
 const c = SDLBackend.c;
@@ -9,14 +7,23 @@ var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = gpa_instance.allocator();
 
 const vsync = true;
-const show_demo = false;
-var scale_val: f32 = 1.0;
+const min_refresh_fps: f32 = 30.0;
+const show_demo = true;
+const show_debug_window = true;
 
-var show_dialog_outside_frame: bool = false;
+const CanvasTarget = extern struct {
+    texture: *c.SDL_GPUTexture,
+    sampler: *c.SDL_GPUSampler,
+};
+
+var open_debug_window_next_frame = show_debug_window;
+var canvas_time: f32 = 0.0;
+var canvas_target: ?dvui.TextureTarget = null;
+var canvas_texture: ?dvui.Texture = null;
 
 /// This example shows how to use dvui for a normal application:
-/// - dvui renders the whole application
-/// - render frames only when needed
+/// - dvui owns frame scheduling/event wait
+/// - a custom SDL3GPU canvas is rendered into a dvui image widget
 pub fn main() !void {
     if (@import("builtin").os.tag == .windows) {
         dvui.Backend.Common.windowsAttachConsole() catch {};
@@ -29,20 +36,18 @@ pub fn main() !void {
 
     defer if (gpa_instance.deinit() != .ok) @panic("Memory leak on exit!");
 
-    // init SDL3GPU backend (creates and owns OS window)
     var backend = try SDLBackend.initWindow(.{
         .allocator = gpa,
         .size = .{ .w = 800.0, .h = 600.0 },
-        .min_size = .{ .w = 250.0, .h = 350.0 },
+        .min_size = .{ .w = 320.0, .h = 240.0 },
         .vsync = vsync,
-        .title = "DVUI SDL3GPU Standalone Example",
+        .title = "DVUI Standalone + SDL3GPU Canvas Widget",
     });
-
     defer backend.deinit();
+    defer cleanupCanvasResources(&backend);
 
     _ = c.SDL_EnableScreenSaver();
 
-    // init dvui Window (maps onto a single OS window)
     var win = try dvui.Window.init(@src(), gpa, backend.backend(), .{
         .theme = switch (backend.preferredColorScheme() orelse .light) {
             .light => dvui.Theme.builtin.adwaita_light,
@@ -52,168 +57,130 @@ pub fn main() !void {
     defer win.deinit();
 
     var interrupted = false;
+    const max_wait_between_frames_micros: u32 = @intFromFloat(1_000_000.0 / min_refresh_fps);
 
     main_loop: while (true) {
-        // beginWait coordinates with waitTime below to run frames only when needed
         const nstime = win.beginWait(interrupted);
-
-        // marks the beginning of a frame for dvui, can call dvui functions after this
         try win.begin(nstime);
 
-        // send all SDL events to dvui for processing
-        _ = try backend.addAllEvents(&win);
+        const quit = try backend.addAllEvents(&win);
+        // Always build the frame, even on quit events, so backend uploads/draws stay valid.
+        const frame_keep_running = gui_frame(&backend);
+        const keep_running = frame_keep_running and !quit;
 
-        // NOTE: SDL3GPU doesn't need manual clearing like SDL_Renderer
-        // GPU backend handles clearing via render pass (LOAD_OP_CLEAR)
-
-        const keep_running = gui_frame();
-
-        // marks end of dvui frame, don't call dvui functions after this
         const end_micros = try win.end(.{});
 
-        // cursor management
         try backend.setCursor(win.cursorRequested());
         try backend.textInputRect(win.textInputRequested());
-
-        // render frame to OS
         try backend.renderPresent();
 
-        if (!keep_running) {
-            std.log.info("Exiting main loop, keep_running = false", .{});
-            break :main_loop;
-        }
+        if (!keep_running) break :main_loop;
 
-        // waitTime and beginWait combine to achieve variable framerates
-        const wait_event_micros = win.waitTime(end_micros);
+        // Keep redraws alive even when dvui has no pending refresh, best-effort >= 30 FPS.
+        const wait_event_micros = @min(win.waitTime(end_micros), max_wait_between_frames_micros);
         interrupted = try backend.waitEventTimeout(wait_event_micros);
-
-        // Example of dialog from another thread
-        if (show_dialog_outside_frame) {
-            show_dialog_outside_frame = false;
-            dvui.dialog(@src(), .{}, .{
-                .window = &win,
-                .modal = false,
-                .title = "Dialog from Outside",
-                .message = "This is a non modal dialog that was created outside win.begin()/win.end(), usually from another thread.",
-            });
-        }
     }
 }
 
-fn gui_frame() bool {
+fn gui_frame(backend: *SDLBackend.SDLBackend) bool {
+    const px = backend.pixelSize();
+    const canvas_w = @max(@as(u32, 1), @as(u32, @intFromFloat(px.w)));
+    const canvas_h = @max(@as(u32, 1), @as(u32, @intFromFloat(px.h)));
+
+    ensureCanvasTexture(backend, canvas_w, canvas_h) catch |err| {
+        std.log.err("Could not create canvas target {}x{}: {any}", .{ canvas_w, canvas_h, err });
+    };
+
+    if (canvas_target) |target| {
+        renderCanvasTarget(backend, target);
+    }
+
     {
-        var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{
-            .style = .window,
-            .background = true,
-            .expand = .horizontal,
+        var root = dvui.box(@src(), .{}, .{
             .name = "main",
+            .expand = .both,
+            .background = true,
         });
-        defer hbox.deinit();
+        defer root.deinit();
 
-        var m = dvui.menu(@src(), .horizontal, .{});
-        defer m.deinit();
-
-        if (dvui.menuItemLabel(@src(), "File", .{ .submenu = true }, .{})) |r| {
-            var fw = dvui.floatingMenu(@src(), .{ .from = r }, .{});
-            defer fw.deinit();
-
-            if (dvui.menuItemLabel(@src(), "Close Menu", .{}, .{ .expand = .horizontal }) != null) {
-                m.close();
-            }
-
-            if (dvui.menuItemLabel(@src(), "Exit", .{}, .{ .expand = .horizontal }) != null) {
-                std.log.info("Exit menu item clicked!", .{});
-                return false;
-            }
-        }
-
-        if (dvui.menuItemLabel(@src(), "Edit", .{ .submenu = true }, .{})) |r| {
-            var fw = dvui.floatingMenu(@src(), .{ .from = r }, .{});
-            defer fw.deinit();
-            _ = dvui.menuItemLabel(@src(), "Dummy", .{}, .{ .expand = .horizontal });
-            _ = dvui.menuItemLabel(@src(), "Dummy Long", .{}, .{ .expand = .horizontal });
-            _ = dvui.menuItemLabel(@src(), "Dummy Super Long", .{}, .{ .expand = .horizontal });
+        if (canvas_texture) |tex| {
+            _ = dvui.image(@src(), .{
+                .source = .{ .texture = tex },
+                .shrink = .both,
+            }, .{
+                .name = "sdl3_canvas",
+                .expand = .both,
+                .margin = .{},
+                .padding = .{},
+                .border = .{},
+                .corner_radius = .{},
+            });
+        } else {
+            dvui.labelNoFmt(@src(), "Canvas unavailable", .{}, .{ .expand = .both });
         }
     }
 
-    var scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both });
-    defer scroll.deinit();
-
-    var tl = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal, .font = .theme(.title) });
-    const lorem = "This example shows how to use dvui in a standalone application with SDL3 GPU.";
-    tl.addText(lorem, .{});
-    tl.deinit();
-
-    var tl2 = dvui.textLayout(@src(), .{}, .{ .expand = .horizontal });
-    tl2.addText(
-        \\DVUI with SDL3 GPU Backend
-        \\- Uses modern GPU API (not SDL_Renderer)
-        \\- Batched rendering with command buffers
-        \\- Efficient texture uploads via transfer buffers
-        \\- Render passes for structured GPU work
-        \\- Supports multiple shader formats (SPIR-V, DXIL, MSL)
-        \\
-        \\
-    , .{});
-    tl2.addText("Framerate is variable and adjusts as needed for input events and animations.\n\n", .{});
-    if (vsync) {
-        tl2.addText("Framerate is capped by vsync (PRESENTMODE_VSYNC).\n", .{});
-    } else {
-        tl2.addText("Framerate is uncapped (PRESENTMODE_IMMEDIATE).\n", .{});
-    }
-    tl2.addText("\n", .{});
-    tl2.addText("Cursor is always being set by dvui.\n\n", .{});
-    if (dvui.useFreeType) {
-        tl2.addText("Fonts are being rendered by FreeType 2.", .{});
-    } else {
-        tl2.addText("Fonts are being rendered by stb_truetype.", .{});
-    }
-    tl2.deinit();
-
-    const label = if (dvui.Examples.show_demo_window) "Hide Demo Window" else "Show Demo Window";
-    if (dvui.button(@src(), label, .{}, .{})) {
-        dvui.Examples.show_demo_window = !dvui.Examples.show_demo_window;
-    }
-
-    if (dvui.button(@src(), "Debug Window", .{}, .{})) {
+    if (open_debug_window_next_frame) {
         dvui.toggleDebugWindow();
+        open_debug_window_next_frame = false;
     }
 
-    {
-        var scaler = dvui.scale(@src(), .{ .scale = &scale_val }, .{ .expand = .horizontal });
-        defer scaler.deinit();
-
-        {
-            var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{});
-            defer hbox.deinit();
-
-            if (dvui.button(@src(), "Zoom In", .{}, .{})) {
-                scale_val = @round(dvui.themeGet().font_body.size * scale_val + 1.0) / dvui.themeGet().font_body.size;
-            }
-
-            if (dvui.button(@src(), "Zoom Out", .{}, .{})) {
-                scale_val = @round(dvui.themeGet().font_body.size * scale_val - 1.0) / dvui.themeGet().font_body.size;
-            }
-        }
-
-        // NOTE: Direct GPU drawing would be different from SDL_Renderer
-        // SDL3GPU uses command buffers, render passes, and pipelines
-        // For now, just show DVUI-only content
-        dvui.labelNoFmt(@src(), "SDL3GPU backend uses batched GPU rendering for all DVUI content.", .{}, .{ .margin = .{ .x = 4 } });
-    }
-
-    if (dvui.button(@src(), "Show Dialog From\nOutside Frame", .{}, .{})) {
-        show_dialog_outside_frame = true;
-    }
-
-    // look at demo() for examples of dvui widgets
+    // Demo window is floating and appears over the main canvas widget.
     dvui.Examples.demo();
 
-    // check for quitting
     for (dvui.events()) |*e| {
         if (e.evt == .window and e.evt.window.action == .close) return false;
         if (e.evt == .app and e.evt.app.action == .quit) return false;
     }
 
     return true;
+}
+
+fn ensureCanvasTexture(backend: *SDLBackend.SDLBackend, width: u32, height: u32) !void {
+    if (canvas_target) |target| {
+        if (target.width == width and target.height == height) return;
+        cleanupCanvasResources(backend);
+    }
+
+    const target = try backend.textureCreateTarget(width, height, .linear);
+    const texture = try backend.textureFromTarget(target);
+    canvas_target = target;
+    canvas_texture = texture;
+}
+
+fn cleanupCanvasResources(backend: *SDLBackend.SDLBackend) void {
+    if (canvas_texture) |tex| {
+        backend.textureDestroy(tex);
+    }
+    canvas_texture = null;
+    canvas_target = null;
+}
+
+fn renderCanvasTarget(backend: *SDLBackend.SDLBackend, target: dvui.TextureTarget) void {
+    const cmd = backend.cmd orelse return;
+
+    canvas_time += 0.016;
+
+    const r_wave = (@sin(@as(f64, canvas_time) * 0.7) + 1.0) * 0.5;
+    const g_wave = (@sin(@as(f64, canvas_time) * 1.1 + 1.2) + 1.0) * 0.5;
+    const b_wave = (@sin(@as(f64, canvas_time) * 0.5 + 2.4) + 1.0) * 0.5;
+
+    const target_impl: *CanvasTarget = @ptrCast(@alignCast(target.ptr));
+
+    var color_target = std.mem.zeroes(c.SDL_GPUColorTargetInfo);
+    color_target.texture = target_impl.texture;
+    color_target.clear_color = .{
+        .r = @floatCast(0.05 + 0.18 * r_wave),
+        .g = @floatCast(0.07 + 0.20 * g_wave),
+        .b = @floatCast(0.11 + 0.24 * b_wave),
+        .a = 1.0,
+    };
+    color_target.load_op = c.SDL_GPU_LOADOP_CLEAR;
+    color_target.store_op = c.SDL_GPU_STOREOP_STORE;
+
+    const pass = c.SDL_BeginGPURenderPass(cmd, &color_target, 1, null) orelse {
+        std.log.err("Failed to begin canvas target pass: {s}", .{c.SDL_GetError()});
+        return;
+    };
+    c.SDL_EndGPURenderPass(pass);
 }
