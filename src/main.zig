@@ -380,14 +380,77 @@ fn drawEditorPane(idx: usize, col_extra: usize) void {
     te.deinit();
 }
 
+fn isLikelyTextFile(path: []const u8) bool {
+    const text_exts = [_][]const u8{
+        ".zig", ".zon", ".txt", ".md", ".json", ".toml", ".yaml", ".yml",
+        ".xml", ".html", ".css", ".js", ".ts", ".c", ".h", ".cpp", ".hpp",
+        ".py", ".rs", ".go", ".sh", ".bash", ".zsh", ".fish", ".conf",
+        ".cfg", ".ini", ".log", ".csv", ".gitignore", ".editorconfig",
+        ".lock", ".mod", ".sum", ".cmake", ".make", ".mk", "Makefile",
+    };
+    const ext = std.fs.path.extension(path);
+    if (ext.len == 0) {
+        // Files without extensions: check basename.
+        const base = std.fs.path.basename(path);
+        for (text_exts) |te| {
+            if (std.mem.eql(u8, base, te)) return true;
+        }
+        return false;
+    }
+    for (text_exts) |te| {
+        if (std.mem.eql(u8, ext, te)) return true;
+    }
+    return false;
+}
+
+const max_file_load_size = 512 * 1024; // 512KB
+
 fn loadFileIntoEntry(te: *dvui.TextEntryWidget, of: *OpenFile) void {
     const path = of.path[0..of.path_len];
-    const file = std.fs.cwd().openFile(path, .{}) catch return;
+
+    if (!isLikelyTextFile(path)) {
+        te.textSet("[Binary file - not displayed]", false);
+        return;
+    }
+
+    const file = std.fs.cwd().openFile(path, .{}) catch {
+        te.textSet("[Could not open file]", false);
+        return;
+    };
     defer file.close();
 
-    // Read up to 2MB.
-    var buf: [2 * 1024 * 1024]u8 = undefined;
-    const bytes_read = file.readAll(&buf) catch return;
+    const stat = file.stat() catch {
+        te.textSet("[Could not stat file]", false);
+        return;
+    };
+
+    if (stat.size > max_file_load_size) {
+        te.textSet("[File too large to display]", false);
+        return;
+    }
+
+    const buf = gpa.alloc(u8, @intCast(stat.size)) catch {
+        te.textSet("[Out of memory]", false);
+        return;
+    };
+    defer gpa.free(buf);
+
+    const bytes_read = file.readAll(buf) catch {
+        te.textSet("[Read error]", false);
+        return;
+    };
+
+    // Quick check: if too many non-text bytes, treat as binary.
+    var non_text: usize = 0;
+    const check_len = @min(bytes_read, 8192);
+    for (buf[0..check_len]) |b| {
+        if (b == 0 or (b < 0x09 and b != 0x07)) non_text += 1;
+    }
+    if (check_len > 0 and non_text * 10 > check_len) {
+        te.textSet("[Binary file - not displayed]", false);
+        return;
+    }
+
     if (bytes_read > 0) {
         te.textSet(buf[0..bytes_read], false);
     }
