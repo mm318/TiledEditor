@@ -21,17 +21,27 @@ const OpenFile = struct {
     title: [256]u8 = undefined,
     title_len: usize = 0,
     open: bool = true,
-    rect: dvui.Rect = .{},
-    rect_set: bool = false,
+    // Initial placement on canvas (in virtual coords).
+    init_x: f32 = 0,
+    init_y: f32 = 0,
+    placed: bool = false,
 };
 
 var open_files: [max_open_files]OpenFile = undefined;
 var open_file_count: usize = 0;
+var active_file_idx: ?usize = null;
+
+const win_w: f32 = 480;
+const win_h: f32 = 380;
+const win_gap: f32 = 24;
 
 fn openFileByPath(path: []const u8) void {
-    // Don't open duplicates.
-    for (open_files[0..open_file_count]) |*f| {
-        if (std.mem.eql(u8, f.path[0..f.path_len], path)) return;
+    // Don't open duplicates — focus existing instead.
+    for (open_files[0..open_file_count], 0..) |*f, i| {
+        if (std.mem.eql(u8, f.path[0..f.path_len], path)) {
+            active_file_idx = i;
+            return;
+        }
     }
     if (open_file_count >= max_open_files) return;
 
@@ -40,13 +50,21 @@ fn openFileByPath(path: []const u8) void {
     @memcpy(of.path[0..path.len], path);
     of.path_len = path.len;
 
-    // Extract basename for title.
     const basename = std.fs.path.basename(path);
     @memcpy(of.title[0..basename.len], basename);
     of.title_len = basename.len;
     of.open = true;
-    of.rect_set = false;
+    of.placed = false;
 
+    // Compute non-overlapping grid position.
+    const n = open_file_count;
+    const cols: usize = @max(1, @as(usize, @intFromFloat(@ceil(@sqrt(@as(f32, @floatFromInt(n + 1)))))));
+    const row: f32 = @floatFromInt(n / cols);
+    const col: f32 = @floatFromInt(n % cols);
+    of.init_x = 20 + col * (win_w + win_gap);
+    of.init_y = 20 + row * (win_h + win_gap);
+
+    active_file_idx = open_file_count;
     open_file_count += 1;
 }
 
@@ -83,7 +101,7 @@ pub fn main() !void {
         .size = .{ .w = 1400.0, .h = 900.0 },
         .min_size = .{ .w = 640.0, .h = 480.0 },
         .vsync = vsync,
-        .title = "znn editor",
+        .title = "Monolith",
     });
     defer backend.deinit();
 
@@ -124,10 +142,116 @@ pub fn main() !void {
 // GUI Frame
 // ---------------------------------------------------------------------------
 
-var split_ratio: f32 = 0.2;
+var split_ratio: f32 = 0.18;
+var sidebar_visible: bool = true;
 
 fn guiFrame() bool {
+    // Outer vertical layout: menu bar | main area | status bar.
     {
+        var outer = dvui.box(@src(), .{}, .{ .expand = .both });
+        defer outer.deinit();
+
+        drawMenuBar();
+        drawMainArea();
+        drawStatusBar();
+    }
+
+    // Floating editor windows are drawn as dvui floating windows.
+    drawFloatingEditors();
+
+    return checkQuit();
+}
+
+// ---------------------------------------------------------------------------
+// Menu bar
+// ---------------------------------------------------------------------------
+
+fn drawMenuBar() void {
+    var bar = dvui.box(@src(), .{ .dir = .horizontal }, .{
+        .expand = .horizontal,
+        .padding = .{ .x = 8, .y = 4, .w = 8, .h = 4 },
+        .background = true,
+        .style = .window,
+        .border = .{ .x = 0, .y = 0, .w = 0, .h = 1 },
+    });
+    defer bar.deinit();
+
+    // Brand.
+    dvui.labelNoFmt(@src(), "Monolith", .{}, .{
+        .font = .theme(.heading),
+        .padding = .{ .x = 0, .y = 0, .w = 16, .h = 0 },
+    });
+
+    // Menus.
+    var m = dvui.menu(@src(), .horizontal, .{});
+    defer m.deinit();
+
+    if (dvui.menuItemLabel(@src(), "File", .{ .submenu = true }, .{})) |r| {
+        var fw = dvui.floatingMenu(@src(), .{ .from = r }, .{});
+        defer fw.deinit();
+
+        if (dvui.menuItemLabel(@src(), "New Window", .{}, .{ .expand = .horizontal }) != null) {
+            fw.close();
+        }
+        if (dvui.menuItemLabel(@src(), "Close All", .{}, .{ .expand = .horizontal }) != null) {
+            closeAllFiles();
+            fw.close();
+        }
+        if (dvui.menuItemLabel(@src(), "Quit", .{}, .{ .expand = .horizontal }) != null) {
+            fw.close();
+        }
+    }
+
+    if (dvui.menuItemLabel(@src(), "Edit", .{ .submenu = true }, .{})) |r| {
+        var fw = dvui.floatingMenu(@src(), .{ .from = r }, .{});
+        defer fw.deinit();
+
+        if (dvui.menuItemLabel(@src(), "Rearrange Windows", .{}, .{ .expand = .horizontal }) != null) {
+            rearrangeWindows();
+            fw.close();
+        }
+        if (dvui.menuItemLabel(@src(), "Toggle Explorer", .{}, .{ .expand = .horizontal }) != null) {
+            sidebar_visible = !sidebar_visible;
+            fw.close();
+        }
+    }
+
+    if (dvui.menuItemLabel(@src(), "View", .{ .submenu = true }, .{})) |r| {
+        var fw = dvui.floatingMenu(@src(), .{ .from = r }, .{});
+        defer fw.deinit();
+
+        _ = dvui.checkbox(@src(), &sidebar_visible, "Show Explorer", .{});
+    }
+}
+
+fn closeAllFiles() void {
+    for (open_files[0..open_file_count]) |*f| {
+        f.open = false;
+    }
+}
+
+fn rearrangeWindows() void {
+    const n = open_file_count;
+    if (n == 0) return;
+    const cols: usize = @max(1, @as(usize, @intFromFloat(@ceil(@sqrt(@as(f32, @floatFromInt(n)))))));
+    for (0..n) |i| {
+        var of = &open_files[i];
+        if (!of.open) continue;
+        const row: f32 = @floatFromInt(i / cols);
+        const col: f32 = @floatFromInt(i % cols);
+        of.init_x = 20 + col * (win_w + win_gap);
+        of.init_y = 20 + row * (win_h + win_gap);
+        // Force dvui to reposition the floating window on next frame
+        of.placed = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Main area: sidebar + canvas
+// ---------------------------------------------------------------------------
+
+fn drawMainArea() void {
+    if (sidebar_visible) {
         var paned_widget = dvui.paned(@src(), .{
             .direction = .horizontal,
             .collapsed_size = 100,
@@ -142,13 +266,118 @@ fn guiFrame() bool {
         }
 
         if (paned_widget.showSecond()) {
-            drawEditorArea();
+            drawCanvas();
         }
 
         paned_widget.deinit();
+    } else {
+        drawCanvas();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas background (right pane)
+// ---------------------------------------------------------------------------
+
+fn drawCanvas() void {
+    var canvas = dvui.box(@src(), .{}, .{
+        .expand = .both,
+        .background = true,
+        .style = .content,
+    });
+    defer canvas.deinit();
+
+    if (open_file_count == 0) {
+        dvui.labelNoFmt(@src(), "Open a file from the explorer to start editing.", .{}, .{
+            .expand = .both,
+            .gravity_x = 0.5,
+            .gravity_y = 0.5,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Floating editor windows
+// ---------------------------------------------------------------------------
+
+fn drawFloatingEditors() void {
+    for (0..open_file_count) |idx| {
+        var of = &open_files[idx];
+        if (!of.open) continue;
+
+        const title = of.title[0..of.title_len];
+        const is_active = (active_file_idx != null and active_file_idx.? == idx);
+
+        // Use Options.rect for initial position on first frame.
+        const init_rect: ?dvui.Rect = if (!of.placed) .{ .x = of.init_x, .y = of.init_y, .w = win_w, .h = win_h } else null;
+        if (!of.placed) of.placed = true;
+
+        var fw = dvui.floatingWindow(@src(), .{
+            .open_flag = &of.open,
+        }, .{
+            .id_extra = idx,
+            .rect = init_rect,
+            .min_size_content = .{ .w = 200, .h = 150 },
+            .border = if (is_active) .all(2) else .all(1),
+            .color_border = if (is_active) dvui.themeGet().focus else null,
+        });
+        defer fw.deinit();
+
+        // Window header with drag area.
+        fw.dragAreaSet(dvui.windowHeader(title, "", &of.open));
+
+        // Text editing area.
+        var te: dvui.TextEntryWidget = undefined;
+        te.init(@src(), .{
+            .multiline = true,
+            .break_lines = true,
+            .scroll_horizontal = false,
+            .text = .{ .internal = .{ .limit = 2_000_000 } },
+        }, .{
+            .expand = .both,
+            .font = .theme(.mono),
+            .id_extra = idx,
+        });
+
+        // Load file content on first frame.
+        if (dvui.firstFrame(te.data().id)) {
+            loadFileIntoEntry(&te, of);
+        }
+
+        te.processEvents();
+        te.draw();
+        te.deinit();
     }
 
-    return checkQuit();
+    // Compact closed files.
+    compactOpenFiles();
+}
+
+// ---------------------------------------------------------------------------
+// Status bar
+// ---------------------------------------------------------------------------
+
+fn drawStatusBar() void {
+    var bar = dvui.box(@src(), .{ .dir = .horizontal }, .{
+        .expand = .horizontal,
+        .padding = .{ .x = 8, .y = 2, .w = 8, .h = 2 },
+        .background = true,
+        .style = .window,
+        .border = .{ .x = 0, .y = 1, .w = 0, .h = 0 },
+    });
+    defer bar.deinit();
+
+    // Left side.
+    {
+        var buf: [64]u8 = undefined;
+        const info = std.fmt.bufPrint(&buf, "{d} file(s) open", .{open_file_count}) catch "?";
+        dvui.labelNoFmt(@src(), info, .{}, .{
+            .expand = .horizontal,
+        });
+    }
+
+    // Right side.
+    dvui.labelNoFmt(@src(), "Spatial Mode", .{}, .{});
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +399,7 @@ fn drawDirectoryTree() void {
         });
         defer header.deinit();
 
-        dvui.labelNoFmt(@src(), "EXPLORER", .{}, .{ .font = .theme(.heading) });
+        dvui.labelNoFmt(@src(), "PROJECT EXPLORER", .{}, .{ .font = .theme(.heading) });
     }
 
     var tree_widget = dvui.TreeWidget.tree(@src(), .{ .enable_reordering = false }, .{
@@ -184,12 +413,11 @@ fn drawDirectoryTree() void {
 }
 
 fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []const u8, depth: u32) void {
-    if (depth > 8) return; // limit recursion
+    if (depth > 8) return;
 
     var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
     defer dir.close();
 
-    // Collect entries into a temporary list to sort them.
     const Entry = struct {
         name_buf: [256]u8 = undefined,
         name_len: usize = 0,
@@ -218,7 +446,6 @@ fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []
         count += 1;
     }
 
-    // Sort: directories first, then alphabetical.
     std.mem.sort(Entry, entries[0..count], {}, struct {
         fn lessThan(_: void, a: Entry, b: Entry) bool {
             if (a.is_dir and !b.is_dir) return true;
@@ -228,7 +455,6 @@ fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []
     }.lessThan);
 
     for (entries[0..count]) |*entry| {
-        // Build full path.
         var path_buf: [4096]u8 = undefined;
         const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.getName() }) catch continue;
 
@@ -237,7 +463,6 @@ fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []
                 .expanded = false,
             }, .{ .id_extra = std.hash.Wyhash.hash(0, entry.getName()) });
 
-            // icon + label on the branch header row
             dvui.labelNoFmt(@src(), entry.getName(), .{}, .{});
 
             if (branch.expander(@src(), .{ .indent = 16 }, .{})) {
@@ -246,12 +471,19 @@ fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []
 
             branch.deinit();
         } else {
-            // Leaf file item - clickable label.
+            // Highlight files that are open.
+            const is_open = blk: {
+                for (open_files[0..open_file_count]) |*f| {
+                    if (std.mem.eql(u8, f.path[0..f.path_len], full_path) and f.open) break :blk true;
+                }
+                break :blk false;
+            };
+
             if (dvui.button(@src(), entry.getName(), .{}, .{
                 .id_extra = std.hash.Wyhash.hash(0, entry.getName()),
                 .border = .{},
                 .corner_radius = .{},
-                .background = false,
+                .background = is_open,
                 .padding = .{ .x = 20, .y = 2, .w = 2, .h = 2 },
                 .expand = .horizontal,
             })) {
@@ -262,134 +494,8 @@ fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []
 }
 
 // ---------------------------------------------------------------------------
-// Editor area (right pane) - tiled text editing boxes
+// File I/O
 // ---------------------------------------------------------------------------
-
-// Fixed cell size for the 3x2 grid (does not change with window size).
-const cell_w: f32 = 370;
-const cell_h: f32 = 430;
-
-fn drawEditorArea() void {
-    // Scrollable canvas so panes stay fixed-size regardless of window.
-    var scroll = dvui.scrollArea(@src(), .{ .vertical = .auto, .horizontal = .auto }, .{
-        .expand = .both,
-        .background = true,
-    });
-    defer scroll.deinit();
-
-    if (open_file_count == 0) {
-        dvui.labelNoFmt(@src(), "Open a file from the explorer to start editing.", .{}, .{
-            .gravity_x = 0.5,
-            .gravity_y = 0.5,
-        });
-        return;
-    }
-
-    // Always at least a 3x2 grid so a single file doesn't fill the canvas.
-    const n = open_file_count;
-    const cols: usize = @max(tilingCols(n), 3);
-    const content_rows = (n + cols - 1) / cols;
-    const rows: usize = @max(content_rows, 2);
-
-    // Build grid of rows.
-    var row: usize = 0;
-    while (row < rows) : (row += 1) {
-        var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{
-            .id_extra = row,
-        });
-        defer hbox.deinit();
-
-        var col: usize = 0;
-        while (col < cols) : (col += 1) {
-            const idx = row * cols + col;
-            if (idx < n) {
-                drawEditorPane(idx, col);
-            } else {
-                // Empty spacer to keep grid uniform.
-                var spacer = dvui.box(@src(), .{}, .{
-                    .min_size_content = .{ .w = cell_w, .h = cell_h },
-                    .id_extra = idx,
-                });
-                spacer.deinit();
-            }
-        }
-    }
-
-    // Remove closed files (compact the array).
-    compactOpenFiles();
-}
-
-fn tilingCols(n: usize) usize {
-    if (n <= 1) return 1;
-    if (n <= 2) return 2;
-    if (n <= 4) return 2;
-    if (n <= 6) return 3;
-    if (n <= 9) return 3;
-    return 4;
-}
-
-fn drawEditorPane(idx: usize, col_extra: usize) void {
-    var of = &open_files[idx];
-    if (!of.open) return;
-
-    const title = of.title[0..of.title_len];
-
-    // Outer frame for this pane — fixed size, not window-dependent.
-    var frame = dvui.box(@src(), .{}, .{
-        .id_extra = idx,
-        .min_size_content = .{ .w = cell_w, .h = cell_h },
-        .border = .{ .x = 1, .y = 1, .w = 1, .h = 1 },
-        .padding = .{},
-        .margin = .{ .x = 1, .y = 1, .w = 1, .h = 1 },
-        .style = .window,
-        .background = true,
-    });
-    defer frame.deinit();
-    _ = col_extra;
-
-    // Title bar.
-    {
-        var title_bar = dvui.box(@src(), .{ .dir = .horizontal }, .{
-            .expand = .horizontal,
-            .padding = .{ .x = 6, .y = 3, .w = 6, .h = 3 },
-            .background = true,
-            .style = .window,
-        });
-        defer title_bar.deinit();
-
-        dvui.labelNoFmt(@src(), title, .{}, .{ .font = .theme(.heading), .expand = .horizontal });
-
-        if (dvui.button(@src(), "X", .{}, .{
-            .min_size_content = .{ .w = 16, .h = 16 },
-            .padding = .{ .x = 2, .y = 2, .w = 2, .h = 2 },
-            .margin = .{},
-        })) {
-            of.open = false;
-        }
-    }
-
-    // Text editing area.
-    var te: dvui.TextEntryWidget = undefined;
-    te.init(@src(), .{
-        .multiline = true,
-        .break_lines = true,
-        .scroll_horizontal = false,
-        .text = .{ .internal = .{ .limit = 2_000_000 } },
-    }, .{
-        .expand = .both,
-        .font = .theme(.mono),
-        .id_extra = idx,
-    });
-
-    // Load file content on first frame.
-    if (dvui.firstFrame(te.data().id)) {
-        loadFileIntoEntry(&te, of);
-    }
-
-    te.processEvents();
-    te.draw();
-    te.deinit();
-}
 
 fn isLikelyTextFile(path: []const u8) bool {
     const text_exts = [_][]const u8{
@@ -401,7 +507,6 @@ fn isLikelyTextFile(path: []const u8) bool {
     };
     const ext = std.fs.path.extension(path);
     if (ext.len == 0) {
-        // Files without extensions: check basename.
         const base = std.fs.path.basename(path);
         for (text_exts) |te| {
             if (std.mem.eql(u8, base, te)) return true;
@@ -414,7 +519,7 @@ fn isLikelyTextFile(path: []const u8) bool {
     return false;
 }
 
-const max_file_load_size = 512 * 1024; // 512KB
+const max_file_load_size = 512 * 1024;
 
 fn loadFileIntoEntry(te: *dvui.TextEntryWidget, of: *OpenFile) void {
     const path = of.path[0..of.path_len];
@@ -451,7 +556,6 @@ fn loadFileIntoEntry(te: *dvui.TextEntryWidget, of: *OpenFile) void {
         return;
     };
 
-    // Quick check: if too many non-text bytes, treat as binary.
     var non_text: usize = 0;
     const check_len = @min(bytes_read, 8192);
     for (buf[0..check_len]) |b| {
@@ -473,8 +577,16 @@ fn compactOpenFiles() void {
         if (open_files[read_idx].open) {
             if (write_idx != read_idx) {
                 open_files[write_idx] = open_files[read_idx];
+                // Fix active index if it was moved.
+                if (active_file_idx != null and active_file_idx.? == read_idx) {
+                    active_file_idx = write_idx;
+                }
             }
             write_idx += 1;
+        } else {
+            if (active_file_idx != null and active_file_idx.? == read_idx) {
+                active_file_idx = null;
+            }
         }
     }
     open_file_count = write_idx;
