@@ -265,32 +265,36 @@ fn renderDirBranch(tree_widget: *dvui.TreeWidget, dir_path: []const u8, root: []
 // Editor area (right pane) - tiled text editing boxes
 // ---------------------------------------------------------------------------
 
+// Fixed cell size for the 3x2 grid (does not change with window size).
+const cell_w: f32 = 370;
+const cell_h: f32 = 430;
+
 fn drawEditorArea() void {
-    var root = dvui.box(@src(), .{}, .{
+    // Scrollable canvas so panes stay fixed-size regardless of window.
+    var scroll = dvui.scrollArea(@src(), .{ .vertical = .auto, .horizontal = .auto }, .{
         .expand = .both,
         .background = true,
     });
-    defer root.deinit();
+    defer scroll.deinit();
 
     if (open_file_count == 0) {
         dvui.labelNoFmt(@src(), "Open a file from the explorer to start editing.", .{}, .{
-            .expand = .both,
             .gravity_x = 0.5,
             .gravity_y = 0.5,
         });
         return;
     }
 
-    // Calculate tiling layout: try to fill the area with a grid.
+    // Always at least a 3x2 grid so a single file doesn't fill the canvas.
     const n = open_file_count;
-    const cols = tilingCols(n);
-    const rows = (n + cols - 1) / cols;
+    const cols: usize = @max(tilingCols(n), 3);
+    const content_rows = (n + cols - 1) / cols;
+    const rows: usize = @max(content_rows, 2);
 
-    // Build grid of rows, each row is a horizontal box.
+    // Build grid of rows.
     var row: usize = 0;
     while (row < rows) : (row += 1) {
         var hbox = dvui.box(@src(), .{ .dir = .horizontal }, .{
-            .expand = .both,
             .id_extra = row,
         });
         defer hbox.deinit();
@@ -298,9 +302,16 @@ fn drawEditorArea() void {
         var col: usize = 0;
         while (col < cols) : (col += 1) {
             const idx = row * cols + col;
-            if (idx >= n) break;
-
-            drawEditorPane(idx, col);
+            if (idx < n) {
+                drawEditorPane(idx, col);
+            } else {
+                // Empty spacer to keep grid uniform.
+                var spacer = dvui.box(@src(), .{}, .{
+                    .min_size_content = .{ .w = cell_w, .h = cell_h },
+                    .id_extra = idx,
+                });
+                spacer.deinit();
+            }
         }
     }
 
@@ -323,10 +334,10 @@ fn drawEditorPane(idx: usize, col_extra: usize) void {
 
     const title = of.title[0..of.title_len];
 
-    // Outer frame for this pane.
+    // Outer frame for this pane — fixed size, not window-dependent.
     var frame = dvui.box(@src(), .{}, .{
-        .expand = .both,
         .id_extra = idx,
+        .min_size_content = .{ .w = cell_w, .h = cell_h },
         .border = .{ .x = 1, .y = 1, .w = 1, .h = 1 },
         .padding = .{},
         .margin = .{ .x = 1, .y = 1, .w = 1, .h = 1 },
@@ -382,11 +393,11 @@ fn drawEditorPane(idx: usize, col_extra: usize) void {
 
 fn isLikelyTextFile(path: []const u8) bool {
     const text_exts = [_][]const u8{
-        ".zig", ".zon", ".txt", ".md", ".json", ".toml", ".yaml", ".yml",
-        ".xml", ".html", ".css", ".js", ".ts", ".c", ".h", ".cpp", ".hpp",
-        ".py", ".rs", ".go", ".sh", ".bash", ".zsh", ".fish", ".conf",
-        ".cfg", ".ini", ".log", ".csv", ".gitignore", ".editorconfig",
-        ".lock", ".mod", ".sum", ".cmake", ".make", ".mk", "Makefile",
+        ".zig",  ".zon",  ".txt",   ".md",   ".json", ".toml",      ".yaml",         ".yml",
+        ".xml",  ".html", ".css",   ".js",   ".ts",   ".c",         ".h",            ".cpp",
+        ".hpp",  ".py",   ".rs",    ".go",   ".sh",   ".bash",      ".zsh",          ".fish",
+        ".conf", ".cfg",  ".ini",   ".log",  ".csv",  ".gitignore", ".editorconfig", ".lock",
+        ".mod",  ".sum",  ".cmake", ".make", ".mk",   "Makefile",
     };
     const ext = std.fs.path.extension(path);
     if (ext.len == 0) {
