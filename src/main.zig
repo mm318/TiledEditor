@@ -1070,6 +1070,11 @@ fn drawLineGutter(index: usize, file: *const EditorFile) void {
 }
 
 fn drawEditorTextEntry(index: usize, file: *EditorFile) void {
+    const cw = dvui.currentWindow();
+
+    // Prevent focus changes from scrolling the canvas.
+    cw.scroll_to_focused = false;
+
     var te: dvui.TextEntryWidget = undefined;
     te.init(@src(), .{
         .multiline = true,
@@ -1086,8 +1091,37 @@ fn drawEditorTextEntry(index: usize, file: *EditorFile) void {
         .font = Font.theme(.mono).larger(-1),
         .color_text = palette.text_dim,
     });
+
+    // The active window's text entry should always have keyboard focus.
+    if (dvui.focusedWidgetId() != te.data().id) {
+        dvui.focusWidget(te.data().id, null, null);
+    }
+    cw.scroll_to_focused = false;
+
+    // Intercept Ctrl+Tab before the text entry consumes it.
+    for (dvui.events()) |*e| {
+        if (e.handled or e.evt != .key) continue;
+        const ke = e.evt.key;
+        if (ke.code == .tab and (ke.action == .down or ke.action == .repeat) and ke.mod.control()) {
+            e.handle(@src(), te.data());
+            cycleFocusWindow();
+            dvui.refresh(null, @src(), te.data().id);
+        }
+    }
+
     te.processEvents();
-    te.draw();
+    cw.scroll_to_focused = false;
+
+    // Draw text and cursor without the focus border (the window frame
+    // already provides the active-window highlight).
+    te.drawBeforeText();
+    te.textLayout.addText(te.text[0..te.len], te.data().options.strip());
+    te.textLayout.addTextDone(te.data().options.strip());
+    if (te.data().id == dvui.focusedWidgetId()) {
+        te.drawCursor();
+    }
+    dvui.clipSet(te.prevClip);
+
     te.deinit();
 }
 
