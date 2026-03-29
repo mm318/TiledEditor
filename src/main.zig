@@ -1507,14 +1507,7 @@ fn drawZoomDock() void {
         .gravity_y = 1.0,
         .margin = .{ .w = 16, .h = 16 },
     });
-
-    const dock_rs = dock.data().rectScale();
-    dvui.subwindowAdd(dock.data().id, dock.data().rect, dock_rs.r, false, null, true);
-    const prev_sw = dvui.subwindowCurrentSet(dock.data().id, .cast(dock.data().rect));
-    defer {
-        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
-        dock.deinit();
-    }
+    defer dock.deinit();
 
     drawMiniMap();
     _ = dvui.spacer(@src(), .{ .min_size_content = .width(14) });
@@ -1539,7 +1532,14 @@ fn drawMiniMap() void {
             .fade = 16,
         },
     });
-    defer outer.deinit();
+
+    const outer_rs = outer.data().rectScale();
+    dvui.subwindowAdd(outer.data().id, outer.data().rect, outer_rs.r, false, null, true);
+    const prev_sw = dvui.subwindowCurrentSet(outer.data().id, .cast(outer.data().rect));
+    defer {
+        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
+        outer.deinit();
+    }
 
     {
         var title = dvui.box(@src(), .{ .dir = .horizontal }, .{
@@ -1642,7 +1642,14 @@ fn drawZoomPanel() void {
             .fade = 16,
         },
     });
-    defer panel.deinit();
+
+    const panel_rs = panel.data().rectScale();
+    dvui.subwindowAdd(panel.data().id, panel.data().rect, panel_rs.r, false, null, true);
+    const prev_sw = dvui.subwindowCurrentSet(panel.data().id, .cast(panel.data().rect));
+    defer {
+        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
+        panel.deinit();
+    }
 
     if (zoomIconButton(1, entypo.plus)) {
         app.canvas.pending_zoom_delta += 0.1;
