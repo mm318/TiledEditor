@@ -17,8 +17,8 @@
     // internet connectivity.
     .dependencies = .{
         .dvui = .{
-            .url = "https://github.com/david-vanderson/dvui/archive/70a552cb980a27320940a7424bf4b5a9301f2d64.tar.gz",
-            .hash = "dvui-0.4.0-dev-AQFJmdgw2wCFbJ1_Q2ETVGjtoz4HorYsKhCzNGd4yXdr",
+            .url = "https://github.com/mm318/dvui/archive/f34a1b6b19008d23a5eaa5b18df82b8911afa117.tar.gz",
+            .hash = "dvui-0.4.0-dev-AQFJmTu_3wBJXK88eU7Wl_19CYi-kxxqbl8KkJTpommU",
         },
     },
 
