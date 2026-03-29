@@ -171,6 +171,26 @@ const AppState = struct {
     search_buf: [96]u8 = [_]u8{0} ** 96,
     files: [max_files]EditorFile = undefined,
     canvas: CanvasState = .{},
+    resize_edges: ResizeEdges = .{},
+};
+
+const ResizeEdges = struct {
+    left: bool = false,
+    right: bool = false,
+    top: bool = false,
+    bottom: bool = false,
+
+    fn any(self: ResizeEdges) bool {
+        return self.left or self.right or self.top or self.bottom;
+    }
+
+    fn cursor(self: ResizeEdges) dvui.enums.Cursor {
+        if ((self.left and self.top) or (self.right and self.bottom)) return .arrow_nw_se;
+        if ((self.right and self.top) or (self.left and self.bottom)) return .arrow_ne_sw;
+        if (self.left or self.right) return .arrow_w_e;
+        if (self.top or self.bottom) return .arrow_n_s;
+        return .arrow;
+    }
 };
 
 const WindowRenderMeta = struct {
@@ -607,7 +627,16 @@ fn drawExplorerPanel() void {
         .color_border = palette.outline_soft,
         .border = .{ .w = 1 },
     });
-    defer panel.deinit();
+
+    // Register as subwindow so mouse events are routed here
+    // instead of passing through to the canvas below.
+    const panel_rs = panel.data().rectScale();
+    dvui.subwindowAdd(panel.data().id, panel.data().rect, panel_rs.r, false, null, true);
+    const prev_sw = dvui.subwindowCurrentSet(panel.data().id, .cast(panel.data().rect));
+    defer {
+        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
+        panel.deinit();
+    }
 
     if (app.rail_mode != .explorer) {
         drawPlaceholderPanel();
@@ -1050,6 +1079,7 @@ fn drawEditorTextEntry(index: usize, file: *EditorFile) void {
     }, .{
         .id_extra = 30_000 + index,
         .expand = .both,
+        .margin = .{},
         .background = false,
         .border = .{},
         .padding = .{ .x = 12, .y = 10, .w = 12, .h = 10 },
@@ -1076,11 +1106,45 @@ fn drawEditorPreview(index: usize, file: *const EditorFile) void {
     });
 }
 
+const resize_border: f32 = 6.0;
+const min_window_w: f32 = 180.0;
+const min_window_h: f32 = 100.0;
+
+fn detectResizeEdges(frame_rect: Rect.Physical, p: Point.Physical) ResizeEdges {
+    return .{
+        .left = p.x <= frame_rect.x + resize_border,
+        .right = p.x >= frame_rect.x + frame_rect.w - resize_border,
+        .top = p.y <= frame_rect.y + resize_border,
+        .bottom = p.y >= frame_rect.y + frame_rect.h - resize_border,
+    };
+}
+
 fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_container: *dvui.ScrollContainerWidget, data_rect_scale: anytype) void {
+    // First pass: focus on any press inside a window (even if already handled by a child widget)
+    for (dvui.events()) |*e| {
+        if (e.evt != .mouse) continue;
+        const me = e.evt.mouse;
+        if (me.floating_win != dvui.subwindowCurrentId()) continue;
+        if (me.action != .press or !me.button.pointer()) continue;
+
+        var i = metas.len;
+        while (i > 0) : (i -= 1) {
+            const meta = metas[i - 1];
+            const frame_rect = meta.frame_wd.borderRectScale().r;
+            if (frame_rect.contains(me.p)) {
+                bringFileToFront(meta.index);
+                dvui.refresh(null, @src(), scroll_container.data().id);
+                break;
+            }
+        }
+    }
+
+    // Second pass: handle interactions (close, drag, resize)
     for (dvui.events()) |*e| {
         if (e.handled or e.evt != .mouse) continue;
 
         const me = e.evt.mouse;
+        if (me.floating_win != dvui.subwindowCurrentId()) continue;
         var i = metas.len;
         while (i > 0) : (i -= 1) {
             const meta = metas[i - 1];
@@ -1093,16 +1157,25 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
             const close_rect = meta.close_wd.borderRectScale().r;
             var file = &app.files[meta.index];
 
+            const edges = detectResizeEdges(frame_rect, me.p);
+            const on_border = edges.any() and !header_rect.insetAll(resize_border).contains(me.p);
+
+            // Cursor feedback
             if (me.action == .position) {
-                if (close_rect.contains(me.p)) {
+                if (captured_here and app.resize_edges.any()) {
+                    dvui.cursorSet(app.resize_edges.cursor());
+                } else if (close_rect.contains(me.p)) {
                     dvui.cursorSet(.hand);
+                } else if (on_border) {
+                    dvui.cursorSet(edges.cursor());
                 } else if (header_rect.contains(me.p)) {
                     dvui.cursorSet(.arrow_all);
                 }
                 break;
             }
 
-            if (close_rect.contains(me.p)) {
+            // Close button
+            if (close_rect.contains(me.p) and !captured_here) {
                 if (me.action == .press and me.button.pointer()) {
                     e.handle(@src(), &meta.close_wd);
                     file.window_open = false;
@@ -1114,10 +1187,59 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                 break;
             }
 
+            // Resize: press on border edge
+            if ((on_border and !captured_here) or (captured_here and app.resize_edges.any())) {
+                if (me.action == .press and me.button.pointer()) {
+                    e.handle(@src(), &meta.frame_wd);
+                    app.resize_edges = edges;
+                    dvui.captureMouse(&meta.frame_wd, e.num);
+                    dvui.dragPreStart(me.p, .{
+                        .cursor = edges.cursor(),
+                        .offset = me.p.diff(frame_rect.topLeft()),
+                    });
+                    dvui.refresh(null, @src(), scroll_container.data().id);
+                } else if (me.action == .release and me.button.pointer() and captured_here) {
+                    e.handle(@src(), &meta.frame_wd);
+                    app.resize_edges = .{};
+                    dvui.captureMouse(null, e.num);
+                    dvui.dragEnd();
+                } else if (me.action == .motion and captured_here) {
+                    if (dvui.dragging(me.p, null)) |_| {
+                        e.handle(@src(), &meta.frame_wd);
+                        const mp = data_rect_scale.pointFromPhysical(me.p);
+                        const re = app.resize_edges;
+                        var r = file.window_rect;
+
+                        if (re.right) {
+                            r.w = @max(mp.x - r.x, min_window_w);
+                        }
+                        if (re.bottom) {
+                            r.h = @max(mp.y - r.y, min_window_h);
+                        }
+                        if (re.left) {
+                            const right_edge = r.x + r.w;
+                            const new_x = @min(mp.x, right_edge - min_window_w);
+                            r.w = right_edge - new_x;
+                            r.x = new_x;
+                        }
+                        if (re.top) {
+                            const bottom_edge = r.y + r.h;
+                            const new_y = @min(mp.y, bottom_edge - min_window_h);
+                            r.h = bottom_edge - new_y;
+                            r.y = new_y;
+                        }
+
+                        file.window_rect = r;
+                        dvui.refresh(null, @src(), scroll_container.data().id);
+                    }
+                }
+                break;
+            }
+
+            // Header drag (move)
             if (header_rect.contains(me.p) or captured_here) {
                 if (me.action == .press and me.button.pointer()) {
                     e.handle(@src(), &meta.header_wd);
-                    bringFileToFront(meta.index);
                     dvui.captureMouse(&meta.frame_wd, e.num);
                     dvui.dragPreStart(me.p, .{
                         .cursor = .arrow_all,
@@ -1146,10 +1268,9 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                 break;
             }
 
+            // Click on body - just consume
             if (me.action == .press and me.button.pointer()) {
                 e.handle(@src(), &meta.frame_wd);
-                bringFileToFront(meta.index);
-                dvui.refresh(null, @src(), scroll_container.data().id);
             }
             break;
         }
@@ -1161,11 +1282,29 @@ fn handleCanvasInteractions(scroll_container: *dvui.ScrollContainerWidget, scrol
     var zoom_anchor: Point.Physical = scroll_rect_scale.r.center();
 
     for (dvui.events()) |*e| {
+        if (e.handled) continue;
+
+        // Ctrl+Tab: cycle focus through open windows
+        if (e.evt == .key) {
+            const ke = e.evt.key;
+            if (ke.code == .tab and (ke.action == .down or ke.action == .repeat) and ke.mod.control()) {
+                e.handle(@src(), scroll_container.data());
+                cycleFocusWindow();
+                dvui.refresh(null, @src(), scroll_container.data().id);
+                continue;
+            }
+        }
+
         if (!scroll_container.matchEvent(e)) continue;
 
         switch (e.evt) {
             .mouse => |me| {
-                if (me.action == .press and me.button == .middle) {
+                // Left-click on blank canvas: defocus all windows
+                if (me.action == .press and me.button.pointer()) {
+                    e.handle(@src(), scroll_container.data());
+                    app.last_active_file = null;
+                    dvui.refresh(null, @src(), scroll_container.data().id);
+                } else if (me.action == .press and me.button == .middle) {
                     e.handle(@src(), scroll_container.data());
                     dvui.captureMouse(scroll_container.data(), e.num);
                     dvui.dragPreStart(me.p, .{});
@@ -1306,7 +1445,14 @@ fn drawCommandStrip() void {
             .fade = 18,
         },
     });
-    defer panel.deinit();
+
+    const panel_rs = panel.data().rectScale();
+    dvui.subwindowAdd(panel.data().id, panel.data().rect, panel_rs.r, false, null, true);
+    const prev_sw = dvui.subwindowCurrentSet(panel.data().id, .cast(panel.data().rect));
+    defer {
+        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
+        panel.deinit();
+    }
 
     if (commandButton(2, "Rearrange", entypo.grid)) {
         rearrangeWindows();
@@ -1361,7 +1507,14 @@ fn drawZoomDock() void {
         .gravity_y = 1.0,
         .margin = .{ .w = 16, .h = 16 },
     });
-    defer dock.deinit();
+
+    const dock_rs = dock.data().rectScale();
+    dvui.subwindowAdd(dock.data().id, dock.data().rect, dock_rs.r, false, null, true);
+    const prev_sw = dvui.subwindowCurrentSet(dock.data().id, .cast(dock.data().rect));
+    defer {
+        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
+        dock.deinit();
+    }
 
     drawMiniMap();
     _ = dvui.spacer(@src(), .{ .min_size_content = .width(14) });
@@ -1646,6 +1799,28 @@ fn bringFileToFront(index: usize) void {
     app.last_active_file = index;
 }
 
+fn cycleFocusWindow() void {
+    var order: [max_files]usize = undefined;
+    const count = buildOpenWindowOrder(&order);
+    if (count == 0) return;
+
+    // Find current active in z-order
+    const current = app.last_active_file;
+    var current_pos: ?usize = null;
+    if (current) |idx| {
+        for (order[0..count], 0..) |file_idx, pos| {
+            if (file_idx == idx) {
+                current_pos = pos;
+                break;
+            }
+        }
+    }
+
+    // Cycle to next in z-order (wrapping), or first if none active
+    const next_pos = if (current_pos) |pos| (pos + 1) % count else 0;
+    bringFileToFront(order[next_pos]);
+}
+
 fn buildOpenWindowOrder(order: *[max_files]usize) usize {
     var count: usize = 0;
     for (app.files, 0..) |file, i| {
@@ -1811,7 +1986,7 @@ fn activeFile() ?usize {
     if (app.last_active_file) |idx| {
         if (app.files[idx].window_open) return idx;
     }
-    return firstOpenFile();
+    return null;
 }
 
 fn activeLanguageLabel() []const u8 {
