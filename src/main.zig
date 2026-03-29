@@ -354,16 +354,15 @@ fn drawAppChrome() void {
 
     drawTopBar();
 
-    var body = dvui.box(@src(), .{ .dir = .horizontal }, .{
-        .expand = .both,
-    });
-    defer body.deinit();
+    {
+        var body = dvui.box(@src(), .{ .dir = .horizontal }, .{
+            .expand = .both,
+        });
+        defer body.deinit();
 
-    drawRail();
-    if (app.sidebar_open) {
-        drawExplorerPanel();
+        drawRail();
+        drawMainArea();
     }
-    drawMainArea();
 
     drawFooter();
 }
@@ -755,6 +754,9 @@ fn drawMainArea() void {
     defer overlay.deinit();
 
     drawSpatialCanvas();
+    if (app.sidebar_open) {
+        drawExplorerPanel();
+    }
     drawCommandStrip();
     drawZoomDock();
 }
