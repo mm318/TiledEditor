@@ -865,7 +865,7 @@ fn drawEditorWindow(index: usize, file: *EditorFile, is_active: bool, bounds: *?
     const base_id = 10_000 + index * 100;
 
     var frame_wd: dvui.WidgetData = undefined;
-    var frame = dvui.box(@src(), .{}, .{
+    var frame = dvui.box(@src(), .{ .dir = .vertical }, .{
         .id_extra = base_id,
         .rect = file.window_rect,
         .padding = .{},
@@ -900,64 +900,81 @@ fn drawEditorWindow(index: usize, file: *EditorFile, is_active: bool, bounds: *?
     }
 
     var header_wd: dvui.WidgetData = undefined;
-    var header = dvui.box(@src(), .{ .dir = .horizontal }, .{
+    var header = dvui.overlay(@src(), .{
         .id_extra = base_id + 1,
         .expand = .horizontal,
+        .min_size_content = .{ .h = 34 },
+        .max_size_content = .height(34),
         .background = true,
         .color_fill = palette.surface_high,
         .color_border = if (is_active) palette.primary.opacity(0.4) else palette.outline_soft,
         .border = .{ .h = 1 },
-        .padding = .{ .x = 10, .y = 6, .w = 10, .h = 6 },
         .data_out = &header_wd,
     });
-    defer header.deinit();
 
-    dvui.icon(@src(), "grip", entypo.menu, .{}, .{
-        .id_extra = base_id + 2,
-        .min_size_content = .all(12),
-        .color_text = palette.text_soft,
-        .gravity_y = 0.5,
-    });
-    _ = dvui.spacer(@src(), .{
-        .id_extra = base_id + 3,
-        .min_size_content = .width(8),
-    });
+    {
+        var title_row = dvui.box(@src(), .{ .dir = .horizontal }, .{
+            .expand = .both,
+            .padding = .{ .x = 10, .y = 6, .w = 34, .h = 6 },
+        });
+        defer title_row.deinit();
 
-    dvui.icon(@src(), file.name, entypo.text_document, .{}, .{
-        .id_extra = base_id + 4,
-        .min_size_content = .all(12),
-        .color_text = fileAccentColor(file.language),
-        .gravity_y = 0.5,
-    });
-    _ = dvui.spacer(@src(), .{
-        .id_extra = base_id + 5,
-        .min_size_content = .width(8),
-    });
+        dvui.icon(@src(), "grip", entypo.menu, .{}, .{
+            .id_extra = base_id + 2,
+            .min_size_content = .all(12),
+            .color_text = palette.text_soft,
+            .gravity_y = 0.5,
+        });
+        _ = dvui.spacer(@src(), .{
+            .id_extra = base_id + 3,
+            .min_size_content = .width(8),
+        });
 
-    dvui.labelNoFmt(@src(), file.name, .{ .align_y = 0.5 }, .{
-        .id_extra = base_id + 6,
-        .expand = .horizontal,
-        .font = Font.theme(.mono).larger(-1).withWeight(.bold),
-        .color_text = palette.text,
-    });
+        dvui.icon(@src(), file.name, entypo.text_document, .{}, .{
+            .id_extra = base_id + 4,
+            .min_size_content = .all(12),
+            .color_text = fileAccentColor(file.language),
+            .gravity_y = 0.5,
+        });
+        _ = dvui.spacer(@src(), .{
+            .id_extra = base_id + 5,
+            .min_size_content = .width(8),
+        });
+
+        dvui.labelNoFmt(@src(), file.name, .{ .align_y = 0.5 }, .{
+            .id_extra = base_id + 6,
+            .expand = .horizontal,
+            .font = Font.theme(.mono).larger(-1).withWeight(.bold),
+            .color_text = palette.text,
+        });
+    }
 
     var close_wd: dvui.WidgetData = undefined;
-    var close_box = dvui.box(@src(), .{}, .{
-        .id_extra = base_id + 7,
-        .background = true,
-        .color_fill = palette.surface_high,
-        .corner_radius = Rect.all(999),
-        .padding = .{ .x = 2, .y = 2, .w = 2, .h = 2 },
-        .min_size_content = .all(14),
-        .data_out = &close_wd,
-    });
-    defer close_box.deinit();
+    {
+        var close_box = dvui.box(@src(), .{}, .{
+            .id_extra = base_id + 7,
+            .gravity_x = 1.0,
+            .gravity_y = 0.5,
+            .margin = .{ .w = 8 },
+            .background = true,
+            .color_fill = palette.surface_low.opacity(0.55),
+            .corner_radius = Rect.all(999),
+            .padding = .{},
+            .min_size_content = .all(18),
+            .max_size_content = .all(18),
+            .data_out = &close_wd,
+        });
+        defer close_box.deinit();
 
-    dvui.icon(@src(), "close", entypo.cross, .{}, .{
-        .id_extra = base_id + 70,
-        .expand = .both,
-        .color_text = palette.text_dim,
-    });
+        dvui.icon(@src(), "close", entypo.cross, .{}, .{
+            .id_extra = base_id + 70,
+            .gravity_x = 0.5,
+            .gravity_y = 0.5,
+            .min_size_content = .all(10),
+            .color_text = palette.text_dim,
+        });
+    }
+    header.deinit();
 
     var body = dvui.box(@src(), .{ .dir = .horizontal }, .{
         .id_extra = base_id + 8,
