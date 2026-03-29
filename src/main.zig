@@ -51,10 +51,9 @@ const palette = struct {
 };
 
 const monolith_theme = blk: {
-    var theme = dvui.Theme.builtin.gruvbox;
+    var theme = dvui.Theme.builtin.adwaita_dark;
 
     theme.name = "Monolith";
-    theme.dark = true;
     theme.focus = palette.primary;
     theme.text_select = palette.primary.opacity(0.28);
 
@@ -110,10 +109,10 @@ const monolith_theme = blk: {
         .border = palette.primary,
     };
 
-    theme.font_body = theme.font_body.withSize(theme.font_body.size - 0.5);
-    theme.font_heading = theme.font_heading.withSize(theme.font_heading.size - 0.25).withWeight(.bold);
-    theme.font_title = theme.font_title.withSize(theme.font_title.size + 5).withWeight(.bold);
-    theme.font_mono = theme.font_mono.withSize(theme.font_mono.size - 0.5);
+    theme.font_body = .find(.{ .family = "Vera Sans", .size = 9.5 });
+    theme.font_heading = .find(.{ .family = "Vera Sans", .weight = .bold, .size = 9.75 });
+    theme.font_title = .find(.{ .family = "Vera Sans", .weight = .bold, .size = 15 });
+    theme.font_mono = .find(.{ .family = "Vera Sans Mono", .size = 9.5 });
 
     break :blk theme;
 };
@@ -433,6 +432,7 @@ fn topMenuButton(id_extra: usize, label: []const u8, active: bool) bool {
         .background = false,
         .border = .{},
         .padding = .{ .x = 6, .y = 2, .w = 6, .h = 2 },
+        .gravity_y = 0.5,
         .color_text = if (active) palette.text else palette.text_dim,
         .font = Font.theme(.body).withWeight(if (active) .bold else .normal).larger(-1),
     });
@@ -453,7 +453,7 @@ fn drawSearchField() void {
 
     dvui.icon(@src(), "search", entypo.magnifying_glass, .{}, .{
         .color_text = palette.text_dim,
-        .min_size_content = .all(14),
+        .min_size_content = .all(12),
         .gravity_y = 0.5,
     });
     _ = dvui.spacer(@src(), .{ .min_size_content = .width(6) });
@@ -526,16 +526,28 @@ fn drawRail() void {
     _ = dvui.spacer(@src(), .{ .min_size_content = .height(20) });
 
     if (railButton(10, "Explorer", entypo.folder, app.rail_mode == .explorer and app.sidebar_open)) {
-        app.rail_mode = .explorer;
-        app.sidebar_open = !app.sidebar_open;
+        if (app.rail_mode == .explorer) {
+            app.sidebar_open = !app.sidebar_open;
+        } else {
+            app.rail_mode = .explorer;
+            app.sidebar_open = true;
+        }
     }
-    if (railButton(11, "Search", entypo.magnifying_glass, app.rail_mode == .search)) {
-        app.rail_mode = .search;
-        app.sidebar_open = true;
+    if (railButton(11, "Search", entypo.magnifying_glass, app.rail_mode == .search and app.sidebar_open)) {
+        if (app.rail_mode == .search) {
+            app.sidebar_open = !app.sidebar_open;
+        } else {
+            app.rail_mode = .search;
+            app.sidebar_open = true;
+        }
     }
-    if (railButton(12, "Layout", entypo.grid, app.rail_mode == .layout)) {
-        app.rail_mode = .layout;
-        app.sidebar_open = true;
+    if (railButton(12, "Layout", entypo.grid, app.rail_mode == .layout and app.sidebar_open)) {
+        if (app.rail_mode == .layout) {
+            app.sidebar_open = !app.sidebar_open;
+        } else {
+            app.rail_mode = .layout;
+            app.sidebar_open = true;
+        }
     }
 
     _ = dvui.spacer(@src(), .{ .expand = .vertical });
@@ -573,6 +585,7 @@ fn railButton(id_extra: usize, label: []const u8, icon_bytes: []const u8, active
         });
 
         dvui.labelNoFmt(@src(), label, .{ .align_x = 0.5 }, .{
+            .expand = .horizontal,
             .font = Font.theme(.body).larger(-4).withWeight(.bold),
             .color_text = if (active) palette.primary else palette.text_dim,
         });
@@ -608,7 +621,7 @@ fn drawExplorerPanel() void {
         });
         defer title_row.deinit();
 
-        dvui.labelNoFmt(@src(), "Project Explorer", .{}, .{
+        dvui.labelNoFmt(@src(), "Project Explorer", .{ .align_y = 0.5 }, .{
             .font = Font.theme(.heading).larger(-1),
             .color_text = palette.text_dim,
         });
@@ -616,6 +629,7 @@ fn drawExplorerPanel() void {
         dvui.icon(@src(), "more", entypo.menu, .{}, .{
             .color_text = palette.text_soft,
             .min_size_content = .all(14),
+            .gravity_y = 0.5,
         });
     }
 
@@ -1294,18 +1308,11 @@ fn drawCommandStrip() void {
     });
     defer panel.deinit();
 
-    if (commandButton(1, "Search", entypo.magnifying_glass)) {
-        app.rail_mode = .search;
-        app.sidebar_open = true;
-    }
-
-    verticalDivider(1);
-
     if (commandButton(2, "Rearrange", entypo.grid)) {
         rearrangeWindows();
     }
 
-    verticalDivider(2);
+    verticalDivider(1);
 
     if (commandButton(3, "Center", entypo.compass)) {
         app.canvas.center_requested = true;
@@ -1313,24 +1320,43 @@ fn drawCommandStrip() void {
 }
 
 fn commandButton(id_extra: usize, label: []const u8, icon_bytes: []const u8) bool {
-    return dvui.buttonLabelAndIcon(@src(), .{
-        .button_opts = .{},
-        .label = label,
-        .tvg_bytes = icon_bytes,
-        .icon_first = true,
-    }, .{
+    var bw: dvui.ButtonWidget = undefined;
+    bw.init(@src(), .{}, .{
         .id_extra = 600 + id_extra,
         .background = false,
         .border = .{},
         .padding = .{ .x = 4, .y = 2, .w = 4, .h = 2 },
         .color_text = palette.text_dim,
         .color_text_hover = palette.primary,
-        .font = Font.theme(.body).larger(-1).withWeight(.bold),
     });
+    bw.processEvents();
+    bw.drawBackground();
+
+    {
+        var row = dvui.box(@src(), .{ .dir = .horizontal }, .{
+            .expand = .horizontal,
+        });
+        defer row.deinit();
+
+        dvui.icon(@src(), label, icon_bytes, .{}, .{
+            .gravity_y = 0.5,
+            .color_text = palette.text_dim,
+        });
+        _ = dvui.spacer(@src(), .{ .min_size_content = .width(5) });
+        dvui.labelNoFmt(@src(), label, .{ .align_y = 0.5 }, .{
+            .font = Font.theme(.body).larger(-1).withWeight(.bold),
+            .color_text = palette.text_dim,
+        });
+    }
+
+    const clicked = bw.clicked();
+    bw.drawFocus();
+    bw.deinit();
+    return clicked;
 }
 
 fn drawZoomDock() void {
-    var dock = dvui.box(@src(), .{}, .{
+    var dock = dvui.box(@src(), .{ .dir = .horizontal }, .{
         .gravity_x = 1.0,
         .gravity_y = 1.0,
         .margin = .{ .w = 16, .h = 16 },
@@ -1338,12 +1364,13 @@ fn drawZoomDock() void {
     defer dock.deinit();
 
     drawMiniMap();
-    _ = dvui.spacer(@src(), .{ .min_size_content = .height(14) });
+    _ = dvui.spacer(@src(), .{ .min_size_content = .width(14) });
     drawZoomPanel();
 }
 
 fn drawMiniMap() void {
     var outer = dvui.box(@src(), .{}, .{
+        .gravity_y = 1.0,
         .min_size_content = .{ .w = 140, .h = 96 },
         .max_size_content = .size(.{ .w = 140, .h = 96 }),
         .background = true,
@@ -1367,7 +1394,7 @@ fn drawMiniMap() void {
         });
         defer title.deinit();
 
-        dvui.labelNoFmt(@src(), "Spatial View", .{}, .{
+        dvui.labelNoFmt(@src(), "Minimap", .{ .align_y = 0.5 }, .{
             .font = Font.theme(.heading).larger(-4),
             .color_text = palette.text_soft,
         });
@@ -1375,6 +1402,7 @@ fn drawMiniMap() void {
         dvui.icon(@src(), "mini-compass", entypo.compass, .{}, .{
             .min_size_content = .all(10),
             .color_text = palette.text_soft.opacity(0.8),
+            .gravity_y = 0.5,
         });
     }
 
@@ -1475,29 +1503,31 @@ fn drawZoomPanel() void {
         .color_text = palette.primary,
     });
 
-    var meter = dvui.box(@src(), .{}, .{
-        .gravity_x = 0.5,
-        .min_size_content = .{ .w = 8, .h = 86 },
-        .max_size_content = .size(.{ .w = 8, .h = 86 }),
-        .background = true,
-        .color_fill = palette.surface_lowest,
-        .corner_radius = Rect.all(999),
-    });
-    defer meter.deinit();
+    {
+        var meter = dvui.box(@src(), .{}, .{
+            .gravity_x = 0.5,
+            .min_size_content = .{ .w = 8, .h = 86 },
+            .max_size_content = .size(.{ .w = 8, .h = 86 }),
+            .background = true,
+            .color_fill = palette.surface_lowest,
+            .corner_radius = Rect.all(999),
+        });
+        defer meter.deinit();
 
-    const track = meter.data().contentRectScale().r.insetAll(1);
-    const fraction = std.math.clamp((app.canvas.scale - 0.5) / 1.5, 0.0, 1.0);
-    const fill_h = track.h * fraction;
-    const fill_rect = Rect.Physical{
-        .x = track.x,
-        .y = track.y + track.h - fill_h,
-        .w = track.w,
-        .h = fill_h,
-    };
-    fill_rect.fill(.{ .x = 999, .y = 999, .w = 999, .h = 999 }, .{
-        .color = palette.primary,
-        .fade = 1.0,
-    });
+        const track = meter.data().contentRectScale().r.insetAll(1);
+        const fraction = std.math.clamp((app.canvas.scale - 0.5) / 1.5, 0.0, 1.0);
+        const fill_h = track.h * fraction;
+        const fill_rect = Rect.Physical{
+            .x = track.x,
+            .y = track.y + track.h - fill_h,
+            .w = track.w,
+            .h = fill_h,
+        };
+        fill_rect.fill(.{ .x = 999, .y = 999, .w = 999, .h = 999 }, .{
+            .color = palette.primary,
+            .fade = 1.0,
+        });
+    }
 
     _ = dvui.spacer(@src(), .{ .min_size_content = .height(8) });
 
@@ -1545,9 +1575,10 @@ fn drawFooter() void {
         dvui.icon(@src(), "branch", entypo.cw, .{}, .{
             .min_size_content = .all(10),
             .color_text = palette.primary,
+            .gravity_y = 0.5,
         });
         _ = dvui.spacer(@src(), .{ .min_size_content = .width(4) });
-        dvui.labelNoFmt(@src(), "Main*", .{}, .{
+        dvui.labelNoFmt(@src(), "Main*", .{ .align_y = 0.5 }, .{
             .font = Font.theme(.body).larger(-3),
             .color_text = palette.text_dim,
         });
@@ -1556,9 +1587,10 @@ fn drawFooter() void {
         dvui.icon(@src(), "warning", entypo.warning, .{}, .{
             .min_size_content = .all(10),
             .color_text = palette.warning,
+            .gravity_y = 0.5,
         });
         _ = dvui.spacer(@src(), .{ .min_size_content = .width(4) });
-        dvui.labelNoFmt(@src(), "1", .{}, .{
+        dvui.labelNoFmt(@src(), "1", .{ .align_y = 0.5 }, .{
             .font = Font.theme(.body).larger(-3),
             .color_text = palette.text_dim,
         });
@@ -1573,12 +1605,12 @@ fn drawFooter() void {
         });
         defer right.deinit();
 
-        dvui.labelNoFmt(@src(), "Spatial Mode", .{}, .{
+        dvui.labelNoFmt(@src(), "Spatial Mode", .{ .align_y = 0.5 }, .{
             .font = Font.theme(.body).larger(-3),
             .color_text = palette.text_soft,
         });
         _ = dvui.spacer(@src(), .{ .min_size_content = .width(12) });
-        dvui.labelNoFmt(@src(), activeLanguageLabel(), .{}, .{
+        dvui.labelNoFmt(@src(), activeLanguageLabel(), .{ .align_y = 0.5 }, .{
             .font = Font.theme(.body).larger(-2).withWeight(.bold),
             .color_text = palette.primary,
         });
