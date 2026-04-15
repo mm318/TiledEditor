@@ -8,7 +8,7 @@
     // This field is optional.
     // This is currently advisory only; Zig does not yet do anything
     // with this value.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
 
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
@@ -17,8 +17,8 @@
     // internet connectivity.
     .dependencies = .{
         .dvui = .{
-            .url = "https://github.com/mm318/dvui/archive/f34a1b6b19008d23a5eaa5b18df82b8911afa117.tar.gz",
-            .hash = "dvui-0.4.0-dev-AQFJmTu_3wBJXK88eU7Wl_19CYi-kxxqbl8KkJTpommU",
+            .url = "https://github.com/mm318/dvui/archive/4ded0dcf681549b3a1f9ce10154d39acff09f3f8.tar.gz",
+            .hash = "dvui-0.4.0-dev-AQFJmV1a2wBIHEUMKSJXkVb1eWGsMCZGNzR1FIbL-s9I",
         },
     },
 

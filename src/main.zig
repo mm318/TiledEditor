@@ -11,9 +11,6 @@ const ScrollInfo = dvui.ScrollInfo;
 const Size = dvui.Size;
 const entypo = dvui.entypo;
 
-var gpa_instance = std.heap.GeneralPurposeAllocator(.{}){};
-const gpa = gpa_instance.allocator();
-
 const vsync = true;
 const min_refresh_fps: f32 = 30.0;
 
@@ -284,15 +281,15 @@ const initial_files = [_]FileSeed{
 
 var app: AppState = .{};
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+
     if (@import("builtin").os.tag == .windows) {
         dvui.Backend.Common.windowsAttachConsole() catch {};
     }
 
     SDLBackend.enableSDLLogging();
     std.log.info("SDL version: {f}", .{SDLBackend.getSDLVersion()});
-
-    defer if (gpa_instance.deinit() != .ok) @panic("Memory leak on exit!");
 
     var backend = try SDLBackend.initWindow(.{
         .allocator = gpa,
