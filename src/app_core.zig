@@ -386,14 +386,6 @@ fn loadProjectFromPath(project_path: []const u8) !ProjectState {
 
     project.tree = try buildProjectTree(project.files.items);
 
-    if (project.files.items.len != 0) {
-        const initial_idx = preferredInitialFile(project.files.items);
-        project.files.items[initial_idx].window_open = true;
-        project.files.items[initial_idx].window_rect = .{ .x = 100, .y = 100, .w = 500, .h = 400 };
-        project.files.items[initial_idx].window_home_rect = project.files.items[initial_idx].window_rect;
-        project.files.items[initial_idx].z_index = 1;
-    }
-
     return project;
 }
 

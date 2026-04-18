@@ -9,6 +9,7 @@ const default_window_w: f32 = 450.0;
 const default_window_h: f32 = 380.0;
 const layout_margin: f32 = 24.0;
 const layout_gap: f32 = 20.0;
+const spawn_gap: f32 = 12.0;
 const visible_spawn_rings: i32 = 6;
 const fallback_spawn_rings: i32 = 16;
 const collision_search_steps: usize = 14;
@@ -106,6 +107,11 @@ pub fn findSpawnRect() app_core.Rect {
         .w = default_window_w,
         .h = default_window_h,
     }, viewport);
+
+    if (findPackedSpawnRect(preferred, viewport, null)) |candidate| {
+        return candidate;
+    }
+
     return findNearestFreeRect(preferred, null);
 }
 
@@ -447,16 +453,73 @@ pub fn checkQuit() bool {
 
 fn canvasViewportRect() app_core.Rect {
     if (app.canvas.scroll_info.viewport.empty()) {
-        return .{ .x = 100, .y = 80, .w = 1200, .h = 760 };
+        const sidebar_w: f32 = if (app.sidebar_open) app_core.explorer_width else 0.0;
+        const fallback_w: f32 = 1200.0 - app_core.rail_width - sidebar_w;
+        return .{ .x = 100 + sidebar_w, .y = 80, .w = fallback_w, .h = 760 };
     }
 
     const scale = @max(app.canvas.scale, 0.001);
+    const sidebar_w = if (app.sidebar_open) app_core.explorer_width / scale else 0.0;
     return .{
-        .x = app.canvas.scroll_info.viewport.x / scale + app.canvas.origin.x,
+        .x = app.canvas.scroll_info.viewport.x / scale + app.canvas.origin.x + sidebar_w,
         .y = app.canvas.scroll_info.viewport.y / scale + app.canvas.origin.y,
-        .w = app.canvas.scroll_info.viewport.w / scale,
+        .w = @max(0.0, app.canvas.scroll_info.viewport.w / scale - sidebar_w),
         .h = app.canvas.scroll_info.viewport.h / scale,
     };
+}
+
+fn findPackedSpawnRect(preferred: app_core.Rect, viewport: app_core.Rect, skip_index: ?usize) ?app_core.Rect {
+    var best: ?app_core.Rect = null;
+    var best_score = std.math.inf(f32);
+
+    for (app.project.files.items, 0..) |file, i| {
+        if (!file.window_open) continue;
+        if (skip_index != null and skip_index.? == i) continue;
+
+        const rect = file.window_rect;
+        const y_positions = [_]f32{
+            rect.y,
+            rect.y + (rect.h - preferred.h) * 0.5,
+            rect.y + rect.h - preferred.h,
+        };
+        const x_positions = [_]f32{
+            rect.x,
+            rect.x + (rect.w - preferred.w) * 0.5,
+            rect.x + rect.w - preferred.w,
+        };
+
+        for (y_positions) |candidate_y| {
+            considerPackedCandidate(.{
+                .x = rect.x + rect.w + spawn_gap,
+                .y = candidate_y,
+                .w = preferred.w,
+                .h = preferred.h,
+            }, preferred, viewport, skip_index, &best, &best_score);
+            considerPackedCandidate(.{
+                .x = rect.x - preferred.w - spawn_gap,
+                .y = candidate_y,
+                .w = preferred.w,
+                .h = preferred.h,
+            }, preferred, viewport, skip_index, &best, &best_score);
+        }
+
+        for (x_positions) |candidate_x| {
+            considerPackedCandidate(.{
+                .x = candidate_x,
+                .y = rect.y + rect.h + spawn_gap,
+                .w = preferred.w,
+                .h = preferred.h,
+            }, preferred, viewport, skip_index, &best, &best_score);
+            considerPackedCandidate(.{
+                .x = candidate_x,
+                .y = rect.y - preferred.h - spawn_gap,
+                .w = preferred.w,
+                .h = preferred.h,
+            }, preferred, viewport, skip_index, &best, &best_score);
+        }
+    }
+
+    return best;
 }
 
 fn clampRectToViewport(rect: app_core.Rect, viewport: app_core.Rect) app_core.Rect {
@@ -480,8 +543,8 @@ fn clampAxisToViewport(pos: f32, size: f32, viewport_start: f32, viewport_size: 
 }
 
 fn findSpiralFreeRect(base_rect: app_core.Rect, skip_index: ?usize, viewport: app_core.Rect, require_viewport_overlap: bool, max_rings: i32) ?app_core.Rect {
-    const step_x = @max(base_rect.w + layout_gap, min_window_w + layout_gap);
-    const step_y = @max(base_rect.h + layout_gap, min_window_h + layout_gap);
+    const step_x = @max(base_rect.w * 0.45, min_window_w * 0.7);
+    const step_y = @max(base_rect.h * 0.45, min_window_h * 0.7);
 
     var ring: i32 = 0;
     while (ring <= max_rings) : (ring += 1) {
@@ -507,6 +570,15 @@ fn findSpiralFreeRect(base_rect: app_core.Rect, skip_index: ?usize, viewport: ap
     return null;
 }
 
+fn considerPackedCandidate(candidate: app_core.Rect, preferred: app_core.Rect, viewport: app_core.Rect, skip_index: ?usize, best: *?app_core.Rect, best_score: *f32) void {
+    considerPackedCandidateVariant(candidate, preferred, viewport, skip_index, best, best_score);
+
+    const clamped_candidate = clampRectToViewport(candidate, viewport);
+    if (!sameRect(clamped_candidate, candidate)) {
+        considerPackedCandidateVariant(clamped_candidate, preferred, viewport, skip_index, best, best_score);
+    }
+}
+
 fn lerpRect(a: app_core.Rect, b: app_core.Rect, t: f32) app_core.Rect {
     return .{
         .x = std.math.lerp(a.x, b.x, t),
@@ -514,6 +586,28 @@ fn lerpRect(a: app_core.Rect, b: app_core.Rect, t: f32) app_core.Rect {
         .w = std.math.lerp(a.w, b.w, t),
         .h = std.math.lerp(a.h, b.h, t),
     };
+}
+
+fn spawnCandidateScore(candidate: app_core.Rect, preferred: app_core.Rect, viewport: app_core.Rect) f32 {
+    const preferred_center = rectCenter(preferred);
+    const candidate_center = rectCenter(candidate);
+    const dx = candidate_center.x - preferred_center.x;
+    const dy = candidate_center.y - preferred_center.y;
+    const invisible_area = candidate.w * candidate.h - rectIntersectionArea(candidate, viewport);
+    return invisible_area * 4.0 + dx * dx + dy * dy;
+}
+
+fn considerPackedCandidateVariant(candidate: app_core.Rect, preferred: app_core.Rect, viewport: app_core.Rect, skip_index: ?usize, best: *?app_core.Rect, best_score: *f32) void {
+    if (anyOpenWindowOverlaps(candidate, skip_index)) return;
+
+    const visible_area = rectIntersectionArea(candidate, viewport);
+    if (visible_area <= 0.0) return;
+
+    const score = spawnCandidateScore(candidate, preferred, viewport);
+    if (best.* == null or score < best_score.*) {
+        best.* = candidate;
+        best_score.* = score;
+    }
 }
 
 fn resolvePairOverlap(a_index: usize, b_index: usize, manipulated: ?usize, anchored: ?usize) bool {
@@ -636,6 +730,17 @@ fn rectCenter(rect: app_core.Rect) app_core.Point {
         .x = rect.x + rect.w * 0.5,
         .y = rect.y + rect.h * 0.5,
     };
+}
+
+fn rectIntersectionArea(a: app_core.Rect, b: app_core.Rect) f32 {
+    const left = @max(a.x, b.x);
+    const top = @max(a.y, b.y);
+    const right = @min(a.x + a.w, b.x + b.w);
+    const bottom = @min(a.y + a.h, b.y + b.h);
+    const w = right - left;
+    const h = bottom - top;
+    if (w <= 0.0 or h <= 0.0) return 0.0;
+    return w * h;
 }
 
 fn axisSign(primary: f32, secondary: f32, default_positive: bool) f32 {
