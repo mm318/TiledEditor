@@ -9,6 +9,8 @@ const workspace = @import("workspace.zig");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
+    try app_core.initRuntime(init);
+    defer app_core.deinit();
 
     if (@import("builtin").os.tag == .windows) {
         dvui.Backend.Common.windowsAttachConsole() catch {};
@@ -41,7 +43,7 @@ pub fn main(init: std.process.Init) !void {
         try win.begin(nstime);
 
         const quit = try backend.addAllEvents(&win);
-        const keep = guiFrame() and !quit;
+        const keep = (try guiFrame()) and !quit;
 
         const end_micros = try win.end(.{});
         try backend.setCursor(win.cursorRequested());
@@ -55,8 +57,8 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn guiFrame() bool {
-    app_core.ensureAppState();
+fn guiFrame() !bool {
+    try app_core.ensureAppState();
     chrome_layout.drawAppChrome();
     return workspace.checkQuit();
 }

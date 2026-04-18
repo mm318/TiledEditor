@@ -317,33 +317,27 @@ fn drawExplorerPanel() void {
     const query = workspace.searchQuery();
     var visible_count: usize = 0;
 
-    if (explorerRow(100, "monolith-core", entypo.folder, 0, true, app.explorer_root_open, true)) {
+    if (explorerRow(100, app.project.name, entypo.folder, 0, true, app.explorer_root_open, true)) {
         app.explorer_root_open = !app.explorer_root_open;
     }
 
     if (app.explorer_root_open) {
-        if (explorerRow(101, "src", entypo.folder, 18, true, app.explorer_src_open, true)) {
-            app.explorer_src_open = !app.explorer_src_open;
-        }
+        for (app.project.files.items, 0..) |file, i| {
+            if (!workspace.matchesSearch(&file, query)) continue;
+            visible_count += 1;
 
-        if (app.explorer_src_open) {
-            for (app.files, 0..) |file, i| {
-                if (!workspace.matchesSearch(&file, query)) continue;
-                visible_count += 1;
-
-                if (explorerRow(200 + i, file.name, entypo.text_document, 40, file.window_open, false, false)) {
-                    workspace.openFile(i);
-                }
+            if (explorerRow(200 + i, file.path, entypo.text_document, 18, file.window_open, false, false)) {
+                workspace.openFile(i);
             }
         }
     }
 
-    if (visible_count == 0 and query.len > 0) {
+    if (visible_count == 0) {
         var empty = dvui.box(@src(), .{}, .{
             .padding = .{ .x = 18, .y = 14, .w = 18, .h = 14 },
         });
         defer empty.deinit();
-        dvui.labelNoFmt(@src(), "No matching files", .{}, .{
+        dvui.labelNoFmt(@src(), if (query.len > 0) "No matching files" else "No text files loaded", .{}, .{
             .font = Font.theme(.body).larger(-1),
             .color_text = palette.text_soft,
         });

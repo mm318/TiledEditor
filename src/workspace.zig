@@ -5,32 +5,35 @@ const app_core = @import("app_core.zig");
 const app = &app_core.app;
 
 pub fn openFile(index: usize) void {
-    if (app.files[index].window_open) {
+    if (app.project.files.items[index].window_open) {
         app.pending_focus_file = index;
         return;
     }
 
-    app.files[index].window_open = true;
-    app.files[index].window_rect = findSpawnRect();
+    app.project.files.items[index].window_open = true;
+    app.project.files.items[index].window_rect = findSpawnRect();
     app.pending_focus_file = index;
 }
 
 pub fn bringFileToFront(index: usize) void {
-    if (!app.files[index].window_open) return;
-    app.files[index].z_index = app.next_z_index;
+    if (!app.project.files.items[index].window_open) return;
+    app.project.files.items[index].z_index = app.next_z_index;
     app.next_z_index += 1;
     app.last_active_file = index;
 }
 
 pub fn cycleFocusWindow() void {
-    var order: [app_core.max_files]usize = undefined;
-    const count = buildOpenWindowOrder(&order);
-    if (count == 0) return;
+    var order: std.ArrayList(usize) = .empty;
+    defer order.deinit(app_core.allocator());
+
+    order.ensureTotalCapacity(app_core.allocator(), app.project.files.items.len) catch return;
+    const order_items = buildOpenWindowOrder(&order);
+    if (order_items.len == 0) return;
 
     const current = app.last_active_file;
     var current_pos: ?usize = null;
     if (current) |idx| {
-        for (order[0..count], 0..) |file_idx, pos| {
+        for (order_items, 0..) |file_idx, pos| {
             if (file_idx == idx) {
                 current_pos = pos;
                 break;
@@ -38,29 +41,28 @@ pub fn cycleFocusWindow() void {
         }
     }
 
-    const next_pos = if (current_pos) |pos| (pos + 1) % count else 0;
-    bringFileToFront(order[next_pos]);
+    const next_pos = if (current_pos) |pos| (pos + 1) % order_items.len else 0;
+    bringFileToFront(order_items[next_pos]);
 }
 
-pub fn buildOpenWindowOrder(order: *[app_core.max_files]usize) usize {
-    var count: usize = 0;
-    for (app.files, 0..) |file, i| {
+pub fn buildOpenWindowOrder(order: *std.ArrayList(usize)) []usize {
+    order.clearRetainingCapacity();
+    for (app.project.files.items, 0..) |file, i| {
         if (!file.window_open) continue;
-        order[count] = i;
-        count += 1;
+        order.appendAssumeCapacity(i);
     }
 
     var i: usize = 1;
-    while (i < count) : (i += 1) {
-        const idx = order[i];
+    while (i < order.items.len) : (i += 1) {
+        const idx = order.items[i];
         var j = i;
-        while (j > 0 and app.files[order[j - 1]].z_index > app.files[idx].z_index) : (j -= 1) {
-            order[j] = order[j - 1];
+        while (j > 0 and app.project.files.items[order.items[j - 1]].z_index > app.project.files.items[idx].z_index) : (j -= 1) {
+            order.items[j] = order.items[j - 1];
         }
-        order[j] = idx;
+        order.items[j] = idx;
     }
 
-    return count;
+    return order.items;
 }
 
 pub fn findSpawnRect() app_core.Rect {
@@ -93,7 +95,7 @@ pub fn rearrangeWindows() void {
     const gap: f32 = 20;
 
     var nth_open: usize = 0;
-    for (&app.files) |*file| {
+    for (app.project.files.items) |*file| {
         if (!file.window_open) continue;
 
         const col = nth_open % cols;
@@ -110,14 +112,14 @@ pub fn rearrangeWindows() void {
 
 pub fn openWindowCount() usize {
     var count: usize = 0;
-    for (app.files) |file| {
+    for (app.project.files.items) |file| {
         if (file.window_open) count += 1;
     }
     return count;
 }
 
 pub fn anyOpenWindowOverlaps(candidate: app_core.Rect, skip_index: ?usize) bool {
-    for (app.files, 0..) |file, i| {
+    for (app.project.files.items, 0..) |file, i| {
         if (skip_index != null and skip_index.? == i) continue;
         if (!file.window_open) continue;
         if (rectsOverlap(candidate, file.window_rect)) return true;
@@ -165,12 +167,13 @@ pub fn fileAccentColor(language: app_core.Language) app_core.Color {
         .cpp => app_core.palette.primary,
         .yaml => app_core.palette.yaml,
         .markdown => app_core.palette.markdown,
+        .zig => app_core.palette.warning,
+        .text => app_core.palette.text_dim,
     };
 }
 
-pub fn iconColor(name: []const u8) app_core.Color {
-    _ = name;
-    return app_core.palette.text_dim;
+pub fn iconColor(path: []const u8) app_core.Color {
+    return fileAccentColor(app_core.languageForPath(path));
 }
 
 pub fn fileVirtualRect(r: app_core.Rect) app_core.Rect {
@@ -183,7 +186,7 @@ pub fn fileVirtualRect(r: app_core.Rect) app_core.Rect {
 }
 
 pub fn firstOpenFile() ?usize {
-    for (app.files, 0..) |file, i| {
+    for (app.project.files.items, 0..) |file, i| {
         if (file.window_open) return i;
     }
     return null;
@@ -191,21 +194,23 @@ pub fn firstOpenFile() ?usize {
 
 pub fn activeFile() ?usize {
     if (app.pending_focus_file) |idx| {
-        if (app.files[idx].window_open) return idx;
+        if (app.project.files.items[idx].window_open) return idx;
     }
 
     if (app.last_active_file) |idx| {
-        if (app.files[idx].window_open) return idx;
+        if (app.project.files.items[idx].window_open) return idx;
     }
     return null;
 }
 
 pub fn activeLanguageLabel() []const u8 {
     if (activeFile()) |idx| {
-        return switch (app.files[idx].language) {
-            .cpp => "C++ 20",
+        return switch (app.project.files.items[idx].language) {
+            .cpp => "C++",
             .yaml => "YAML",
             .markdown => "Markdown",
+            .zig => "Zig",
+            .text => "Text",
         };
     }
     return "Spatial";

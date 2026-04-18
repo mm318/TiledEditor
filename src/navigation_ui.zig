@@ -163,7 +163,7 @@ fn drawMiniMap() void {
     const sy = inner.h / virtual_h;
     const active_idx = workspace.activeFile();
 
-    for (app.files, 0..) |file, i| {
+    for (app.project.files.items, 0..) |file, i| {
         if (!file.window_open) continue;
         const vr = workspace.fileVirtualRect(file.window_rect);
         const color = if (active_idx != null and active_idx.? == i)

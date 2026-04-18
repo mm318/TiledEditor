@@ -35,13 +35,15 @@ pub fn drawSpatialCanvas() void {
 
     drawCanvasGrid(scroll_rect_scale.r, data_rect_scale);
 
-    var previous_rects: [app_core.max_files]Rect = undefined;
-    for (app.files, 0..) |file, i| {
-        previous_rects[i] = file.window_rect;
+    const files = app.project.files.items;
+    if (!app_core.prepareRenderScratch(files.len)) return;
+
+    for (files, 0..) |file, i| {
+        app.previous_rects.items[i] = file.window_rect;
     }
 
     if (app.pending_focus_file) |idx| {
-        if (app.files[idx].window_open) {
+        if (files[idx].window_open) {
             workspace.bringFileToFront(idx);
         }
         app.pending_focus_file = null;
@@ -50,23 +52,21 @@ pub fn drawSpatialCanvas() void {
     var bounds: ?Rect.Physical = null;
     const active_idx = workspace.activeFile();
 
-    var render_order: [app_core.max_files]usize = undefined;
-    const render_count = workspace.buildOpenWindowOrder(&render_order);
-    var metas: [app_core.max_files]WindowRenderMeta = undefined;
+    const render_order = workspace.buildOpenWindowOrder(&app.render_order);
     var meta_count: usize = 0;
 
-    for (render_order[0..render_count]) |file_index| {
+    for (render_order) |file_index| {
         drawEditorWindow(
             file_index,
-            &app.files[file_index],
+            &app.project.files.items[file_index],
             active_idx != null and active_idx.? == file_index,
             &bounds,
-            &metas[meta_count],
+            &app.render_metas.items[meta_count],
         );
         meta_count += 1;
     }
 
-    processEditorWindowInteractions(metas[0..meta_count], scroll_container, data_rect_scale);
+    processEditorWindowInteractions(app.render_metas.items[0..meta_count], scroll_container, data_rect_scale);
 
     handleCanvasInteractions(scroll_container, scroll_rect_scale, data_rect_scale);
     scaler.deinit();
@@ -75,10 +75,10 @@ pub fn drawSpatialCanvas() void {
     scroll_area.deinit();
 
     updateCanvasBounds(scroll_container_id, scroll_rect_scale, bounds);
-    resolveWindowCollisions(previous_rects);
+    resolveWindowCollisions(app.previous_rects.items);
 
     if (app.last_active_file) |idx| {
-        if (!app.files[idx].window_open) {
+        if (!app.project.files.items[idx].window_open) {
             if (workspace.firstOpenFile()) |fallback| {
                 app.last_active_file = fallback;
             } else {
@@ -290,7 +290,11 @@ fn drawEditorTextEntry(index: usize, file: *app_core.EditorFile) void {
         .multiline = true,
         .break_lines = true,
         .scroll_horizontal = false,
-        .text = .{ .buffer = file.content[0..] },
+        .text = .{ .buffer_dynamic = .{
+            .backing = &file.content,
+            .allocator = app_core.allocator(),
+            .limit = app_core.max_editable_file_bytes,
+        } },
     }, .{
         .id_extra = 30_000 + index,
         .expand = .both,
@@ -389,7 +393,7 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
 
             const header_rect = meta.header_wd.borderRectScale().r;
             const close_rect = meta.close_wd.borderRectScale().r;
-            var file = &app.files[meta.index];
+            var file = &app.project.files.items[meta.index];
 
             const edges = detectResizeEdges(frame_rect, me.p);
             const on_border = edges.any() and !header_rect.insetAll(resize_border).contains(me.p);
@@ -639,12 +643,12 @@ fn updateCanvasBounds(scroll_id: dvui.Id, scroll_rect_scale: anytype, bounds: ?R
     }
 }
 
-fn resolveWindowCollisions(previous_rects: [app_core.max_files]Rect) void {
-    for (&app.files, 0..) |*file, i| {
+fn resolveWindowCollisions(previous_rects: []const Rect) void {
+    for (app.project.files.items, 0..) |*file, i| {
         if (!file.window_open) continue;
         if (workspace.sameRect(previous_rects[i], file.window_rect)) continue;
 
-        for (app.files, 0..) |other, j| {
+        for (app.project.files.items, 0..) |other, j| {
             if (i == j or !other.window_open) continue;
             if (workspace.rectsOverlap(file.window_rect, other.window_rect)) {
                 file.window_rect = previous_rects[i];

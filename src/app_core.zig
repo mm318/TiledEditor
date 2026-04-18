@@ -12,13 +12,14 @@ pub const entypo = dvui.entypo;
 pub const vsync = true;
 pub const min_refresh_fps: f32 = 30.0;
 
-pub const max_files = 4;
-pub const max_text_bytes = 8_192;
-
 pub const rail_width: f32 = 64.0;
 pub const explorer_width: f32 = 240.0;
 pub const header_height: f32 = 40.0;
 pub const footer_height: f32 = 24.0;
+
+pub const max_loaded_file_bytes: usize = 512 * 1024;
+pub const max_editable_file_bytes: usize = 2 * 1024 * 1024;
+pub const file_buffer_headroom: usize = 512;
 
 pub const palette = struct {
     pub const background = Color.fromHex("#060e20");
@@ -116,6 +117,8 @@ pub const Language = enum {
     cpp,
     yaml,
     markdown,
+    zig,
+    text,
 };
 
 pub const RailMode = enum {
@@ -124,23 +127,37 @@ pub const RailMode = enum {
     layout,
 };
 
-pub const FileSeed = struct {
-    name: []const u8,
-    path: []const u8,
-    language: Language,
-    content: []const u8,
-    open: bool,
-    rect: Rect,
-};
-
 pub const EditorFile = struct {
     name: []const u8 = "",
     path: []const u8 = "",
-    language: Language = .cpp,
-    content: [max_text_bytes]u8 = [_]u8{0} ** max_text_bytes,
+    language: Language = .text,
+    content: []u8 = &.{},
     window_open: bool = false,
     window_rect: Rect = .{},
     z_index: usize = 0,
+
+    pub fn deinit(self: *EditorFile, gpa: std.mem.Allocator) void {
+        if (self.name.len != 0) gpa.free(self.name);
+        if (self.path.len != 0) gpa.free(self.path);
+        if (self.content.len != 0) gpa.free(self.content);
+        self.* = .{};
+    }
+};
+
+pub const ProjectState = struct {
+    name: []const u8 = "",
+    root_path: []const u8 = "",
+    files: std.ArrayList(EditorFile) = .empty,
+
+    pub fn deinit(self: *ProjectState, gpa: std.mem.Allocator) void {
+        for (self.files.items) |*file| {
+            file.deinit(gpa);
+        }
+        self.files.deinit(gpa);
+        if (self.name.len != 0) gpa.free(self.name);
+        if (self.root_path.len != 0) gpa.free(self.root_path);
+        self.* = .{};
+    }
 };
 
 pub const CanvasState = struct {
@@ -173,21 +190,6 @@ pub const ResizeEdges = struct {
     }
 };
 
-pub const AppState = struct {
-    initialized: bool = false,
-    sidebar_open: bool = true,
-    explorer_root_open: bool = true,
-    explorer_src_open: bool = true,
-    rail_mode: RailMode = .explorer,
-    pending_focus_file: ?usize = null,
-    last_active_file: ?usize = 1,
-    next_z_index: usize = 1,
-    search_buf: [96]u8 = [_]u8{0} ** 96,
-    files: [max_files]EditorFile = undefined,
-    canvas: CanvasState = .{},
-    resize_edges: ResizeEdges = .{},
-};
-
 pub const WindowRenderMeta = struct {
     index: usize,
     frame_wd: dvui.WidgetData,
@@ -195,121 +197,276 @@ pub const WindowRenderMeta = struct {
     close_wd: dvui.WidgetData,
 };
 
-pub const initial_files = [_]FileSeed{
-    .{
-        .name = "main.cpp",
-        .path = "src/core/execution",
-        .language = .cpp,
-        .content =
-        \\#include "monolith_core.h"
-        \\#include "utils.h"
-        \\
-        \\int main(int argc) {
-        \\  auto engine = Engine::create();
-        \\  engine->initialize();
-        \\
-        \\  while (engine->isRunning()) {
-        \\    engine->update();
-        \\    engine->render();
-        \\  }
-        \\
-        \\  return 0;
-        \\}
-        ,
-        .open = true,
-        .rect = .{ .x = 100, .y = 100, .w = 500, .h = 400 },
-    },
-    .{
-        .name = "utils.h",
-        .path = "src/util",
-        .language = .cpp,
-        .content =
-        \\#ifndef UTILS_H
-        \\#define UTILS_H
-        \\
-        \\#include <string>
-        \\#include <vector>
-        \\
-        \\namespace mon_util {
-        \\  void log(const std::string& msg);
-        \\  std::vector<std::string> split(const std::string& s, char delimiter);
-        \\}
-        \\
-        \\#endif
-        ,
-        .open = true,
-        .rect = .{ .x = 650, .y = 150, .w = 300, .h = 350 },
-    },
-    .{
-        .name = "config.yaml",
-        .path = "config",
-        .language = .yaml,
-        .content =
-        \\version: "1.0.4"
-        \\env: prod
-        \\logging:
-        \\  level: debug
-        \\  output: stdout
-        \\network:
-        \\  port: 8080
-        \\  host: 0.0.0.0
-        ,
-        .open = false,
-        .rect = .{ .x = 360, .y = 240, .w = 450, .h = 380 },
-    },
-    .{
-        .name = "README.md",
-        .path = ".",
-        .language = .markdown,
-        .content =
-        \\# Monolith
-        \\
-        \\Spatial computing engine for high-performance code exploration.
-        \\
-        \\## Features
-        \\- Tiling spatial layout
-        \\- Real-time synchronization
-        \\- Minimalist design system
-        \\- High-performance rendering
-        ,
-        .open = false,
-        .rect = .{ .x = 420, .y = 280, .w = 450, .h = 380 },
-    },
+pub const AppState = struct {
+    initialized: bool = false,
+    sidebar_open: bool = true,
+    explorer_root_open: bool = true,
+    rail_mode: RailMode = .explorer,
+    pending_focus_file: ?usize = null,
+    last_active_file: ?usize = null,
+    next_z_index: usize = 1,
+    search_buf: [96]u8 = [_]u8{0} ** 96,
+    project: ProjectState = .{},
+    canvas: CanvasState = .{},
+    resize_edges: ResizeEdges = .{},
+    previous_rects: std.ArrayList(Rect) = .empty,
+    render_order: std.ArrayList(usize) = .empty,
+    render_metas: std.ArrayList(WindowRenderMeta) = .empty,
+
+    pub fn deinit(self: *AppState, gpa: std.mem.Allocator) void {
+        self.project.deinit(gpa);
+        self.previous_rects.deinit(gpa);
+        self.render_order.deinit(gpa);
+        self.render_metas.deinit(gpa);
+        self.* = .{};
+    }
 };
 
+const RuntimeState = struct {
+    initialized: bool = false,
+    allocator: ?std.mem.Allocator = null,
+    io: ?std.Io = null,
+    project_path: ?[]u8 = null,
+};
+
+var runtime: RuntimeState = .{};
 pub var app: AppState = .{};
 
-pub fn setFileText(file: *EditorFile, text: []const u8) void {
-    @memset(file.content[0..], 0);
-    const len = @min(text.len, file.content.len - 1);
-    @memcpy(file.content[0..len], text[0..len]);
+pub fn initRuntime(init: std.process.Init) !void {
+    if (runtime.initialized) return;
+
+    runtime.allocator = init.gpa;
+    runtime.io = init.io;
+
+    var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
+    defer args.deinit();
+
+    _ = args.next();
+    if (args.next()) |path| {
+        runtime.project_path = try init.gpa.dupe(u8, path);
+    } else {
+        const cwd = try std.process.currentPathAlloc(init.io, init.gpa);
+        defer init.gpa.free(cwd);
+        runtime.project_path = try init.gpa.dupe(u8, cwd);
+    }
+
+    runtime.initialized = true;
+}
+
+pub fn deinit() void {
+    if (runtime.allocator) |gpa| {
+        app.deinit(gpa);
+        if (runtime.project_path) |path| {
+            gpa.free(path);
+        }
+    }
+    runtime = .{};
+}
+
+pub fn allocator() std.mem.Allocator {
+    return runtime.allocator orelse @panic("app runtime not initialized");
+}
+
+pub fn io() std.Io {
+    return runtime.io orelse @panic("app runtime not initialized");
 }
 
 pub fn fileText(file: *const EditorFile) []const u8 {
-    return std.mem.sliceTo(file.content[0..], 0);
+    return std.mem.sliceTo(file.content, 0);
 }
 
-pub fn ensureAppState() void {
+pub fn prepareRenderScratch(file_count: usize) bool {
+    const gpa = allocator();
+
+    app.previous_rects.resize(gpa, file_count) catch return false;
+    app.render_order.clearRetainingCapacity();
+    app.render_order.ensureTotalCapacity(gpa, file_count) catch return false;
+    app.render_metas.resize(gpa, file_count) catch return false;
+    return true;
+}
+
+pub fn languageForPath(path: []const u8) Language {
+    const ext = std.fs.path.extension(path);
+    if (std.mem.eql(u8, ext, ".yaml") or std.mem.eql(u8, ext, ".yml")) return .yaml;
+    if (std.mem.eql(u8, ext, ".md") or std.mem.eql(u8, ext, ".markdown")) return .markdown;
+    if (std.mem.eql(u8, ext, ".zig") or std.mem.eql(u8, ext, ".zon")) return .zig;
+    if (std.mem.eql(u8, ext, ".c") or std.mem.eql(u8, ext, ".cc") or std.mem.eql(u8, ext, ".cpp") or std.mem.eql(u8, ext, ".cxx") or std.mem.eql(u8, ext, ".h") or std.mem.eql(u8, ext, ".hh") or std.mem.eql(u8, ext, ".hpp") or std.mem.eql(u8, ext, ".hxx")) return .cpp;
+    return .text;
+}
+
+pub fn ensureAppState() !void {
     if (app.initialized) return;
 
-    var next_z: usize = 1;
-    for (initial_files, 0..) |seed, i| {
-        app.files[i] = .{
-            .name = seed.name,
-            .path = seed.path,
-            .language = seed.language,
-            .window_open = seed.open,
-            .window_rect = seed.rect,
-            .z_index = if (seed.open) blk: {
-                defer next_z += 1;
-                break :blk next_z;
-            } else 0,
-        };
-        setFileText(&app.files[i], seed.content);
+    const project_path = runtime.project_path orelse return error.MissingProjectPath;
+    var project = try loadProjectFromPath(project_path);
+    errdefer project.deinit(allocator());
+
+    app.project = project;
+    app.next_z_index = 1;
+    app.pending_focus_file = null;
+    app.last_active_file = null;
+
+    var top_idx: ?usize = null;
+    for (app.project.files.items, 0..) |file, i| {
+        if (!file.window_open) continue;
+        if (file.z_index >= app.next_z_index) {
+            app.next_z_index = file.z_index + 1;
+        }
+        if (top_idx == null or app.project.files.items[top_idx.?].z_index <= file.z_index) {
+            top_idx = i;
+        }
     }
 
-    app.next_z_index = next_z;
-    app.pending_focus_file = 1;
-    app.last_active_file = 1;
+    app.pending_focus_file = top_idx;
+    app.last_active_file = top_idx;
     app.initialized = true;
+}
+
+fn loadProjectFromPath(project_path: []const u8) !ProjectState {
+    var project: ProjectState = .{
+        .name = try makeProjectName(project_path),
+        .root_path = try makeProjectRootPath(project_path),
+    };
+    errdefer project.deinit(allocator());
+
+    var root_dir = try openProjectDir(project_path);
+    defer root_dir.close(io());
+
+    var walker = try std.Io.Dir.walkSelectively(root_dir, allocator());
+    defer walker.deinit();
+
+    while (try walker.next(io())) |entry| {
+        switch (entry.kind) {
+            .directory => {
+                if (!shouldSkipDirectory(entry.basename)) {
+                    try walker.enter(io(), entry);
+                }
+            },
+            .file => {
+                maybeAppendFilesystemFile(&project, root_dir, entry.path) catch |err| {
+                    std.log.warn("skipping {s}: {t}", .{ entry.path, err });
+                };
+            },
+            else => {},
+        }
+    }
+
+    std.sort.block(EditorFile, project.files.items, {}, struct {
+        fn lessThan(_: void, a: EditorFile, b: EditorFile) bool {
+            return std.mem.order(u8, a.path, b.path) == .lt;
+        }
+    }.lessThan);
+
+    if (project.files.items.len != 0) {
+        const initial_idx = preferredInitialFile(project.files.items);
+        project.files.items[initial_idx].window_open = true;
+        project.files.items[initial_idx].window_rect = .{ .x = 100, .y = 100, .w = 500, .h = 400 };
+        project.files.items[initial_idx].z_index = 1;
+    }
+
+    return project;
+}
+
+fn openProjectDir(project_path: []const u8) !std.Io.Dir {
+    return if (std.fs.path.isAbsolute(project_path))
+        std.Io.Dir.openDirAbsolute(io(), project_path, .{ .iterate = true })
+    else
+        std.Io.Dir.cwd().openDir(io(), project_path, .{ .iterate = true });
+}
+
+fn makeProjectName(project_path: []const u8) ![]u8 {
+    var end = project_path.len;
+    while (end > 0 and project_path[end - 1] == std.fs.path.sep) : (end -= 1) {}
+    const trimmed = project_path[0..end];
+    if (trimmed.len == 0 or std.mem.eql(u8, trimmed, ".")) {
+        const cwd = try std.process.currentPathAlloc(io(), allocator());
+        defer allocator().free(cwd);
+        return allocator().dupe(u8, std.fs.path.basename(cwd));
+    }
+    return allocator().dupe(u8, std.fs.path.basename(trimmed));
+}
+
+fn makeProjectRootPath(project_path: []const u8) ![]u8 {
+    if (project_path.len == 0 or std.mem.eql(u8, project_path, ".")) {
+        const cwd = try std.process.currentPathAlloc(io(), allocator());
+        defer allocator().free(cwd);
+        return allocator().dupe(u8, cwd);
+    }
+    return allocator().dupe(u8, project_path);
+}
+
+fn shouldSkipDirectory(name: []const u8) bool {
+    return std.mem.eql(u8, name, ".git") or
+        std.mem.eql(u8, name, ".zig-cache") or
+        std.mem.eql(u8, name, "zig-cache") or
+        std.mem.eql(u8, name, "zig-out") or
+        std.mem.eql(u8, name, "zig-pkg") or
+        std.mem.eql(u8, name, "node_modules");
+}
+
+fn maybeAppendFilesystemFile(project: *ProjectState, root_dir: std.Io.Dir, relative_path: []const u8) !void {
+    const bytes = root_dir.readFileAlloc(io(), relative_path, allocator(), .limited(max_loaded_file_bytes)) catch |err| switch (err) {
+        error.FileNotFound,
+        error.AccessDenied,
+        error.PermissionDenied,
+        error.IsDir,
+        error.NameTooLong,
+        error.FileTooBig,
+        error.StreamTooLong,
+        => return,
+        else => |e| return e,
+    };
+    defer allocator().free(bytes);
+
+    if (!isTextContent(bytes)) return;
+
+    const file = try makeEditorFile(relative_path, languageForPath(relative_path), bytes);
+    errdefer {
+        var doomed = file;
+        doomed.deinit(allocator());
+    }
+
+    try project.files.append(allocator(), file);
+}
+
+fn makeEditorFile(relative_path: []const u8, language: Language, text: []const u8) !EditorFile {
+    const name = try allocator().dupe(u8, std.fs.path.basename(relative_path));
+    errdefer allocator().free(name);
+
+    const path = try allocator().dupe(u8, relative_path);
+    errdefer allocator().free(path);
+
+    const content = try makeEditableBuffer(text);
+    errdefer allocator().free(content);
+
+    return .{
+        .name = name,
+        .path = path,
+        .language = language,
+        .content = content,
+    };
+}
+
+fn makeEditableBuffer(text: []const u8) ![]u8 {
+    const needed = text.len + 1;
+    if (needed > max_editable_file_bytes) return error.FileTooLarge;
+
+    const capacity = @min(@max(needed + file_buffer_headroom, 256), max_editable_file_bytes);
+    const buffer = try allocator().alloc(u8, capacity);
+    @memcpy(buffer[0..text.len], text);
+    @memset(buffer[text.len..], 0);
+    return buffer;
+}
+
+fn isTextContent(bytes: []const u8) bool {
+    if (bytes.len == 0) return true;
+    if (std.mem.indexOfScalar(u8, bytes, 0) != null) return false;
+    return std.unicode.utf8ValidateSlice(bytes);
+}
+
+fn preferredInitialFile(files: []const EditorFile) usize {
+    for (files, 0..) |file, i| {
+        if (std.ascii.eqlIgnoreCase(file.name, "README.md")) return i;
+    }
+    return 0;
 }
