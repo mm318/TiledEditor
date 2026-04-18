@@ -3,6 +3,22 @@ const dvui = @import("dvui");
 const app_core = @import("app_core.zig");
 
 const app = &app_core.app;
+const min_window_w: f32 = 180.0;
+const min_window_h: f32 = 100.0;
+const default_window_w: f32 = 450.0;
+const default_window_h: f32 = 380.0;
+const layout_margin: f32 = 24.0;
+const layout_gap: f32 = 20.0;
+const visible_spawn_rings: i32 = 6;
+const fallback_spawn_rings: i32 = 16;
+const collision_search_steps: usize = 14;
+const spring_pull: f32 = 0.12;
+const spring_damping: f32 = 0.82;
+const max_window_speed: f32 = 42.0;
+const collision_iterations: usize = 10;
+const collision_velocity_transfer: f32 = 0.28;
+const settle_position_epsilon: f32 = 0.35;
+const settle_velocity_epsilon: f32 = 0.05;
 
 pub const TextSearchMatch = struct {
     line_number: usize,
@@ -22,6 +38,8 @@ pub fn openFile(index: usize) void {
 
     app.project.files.items[index].window_open = true;
     app.project.files.items[index].window_rect = findSpawnRect();
+    app.project.files.items[index].window_home_rect = app.project.files.items[index].window_rect;
+    app.project.files.items[index].window_velocity = .{};
     app.pending_focus_file = index;
     app.pending_editor_focus = index;
     app.pending_search_focus = false;
@@ -81,47 +99,66 @@ pub fn buildOpenWindowOrder(order: *std.ArrayList(usize)) []usize {
 }
 
 pub fn findSpawnRect() app_core.Rect {
-    const width: f32 = 450;
-    const height: f32 = 380;
-    const gap: f32 = 20;
-
-    var x: f32 = 200;
-    var y: f32 = 150;
-    var attempt: usize = 0;
-    while (attempt < 64) : (attempt += 1) {
-        const candidate = app_core.Rect{ .x = x, .y = y, .w = width, .h = height };
-        if (!anyOpenWindowOverlaps(candidate, null)) {
-            return candidate;
-        }
-        x += gap;
-        y += gap;
-    }
-
-    return .{ .x = 200, .y = 150, .w = width, .h = height };
+    const viewport = canvasViewportRect();
+    const preferred = clampRectToViewport(.{
+        .x = viewport.x + (viewport.w - default_window_w) * 0.5,
+        .y = viewport.y + (viewport.h - default_window_h) * 0.5,
+        .w = default_window_w,
+        .h = default_window_h,
+    }, viewport);
+    return findNearestFreeRect(preferred, null);
 }
 
 pub fn rearrangeWindows() void {
-    const count = openWindowCount();
-    if (count == 0) return;
+    var order: std.ArrayList(usize) = .empty;
+    defer order.deinit(app_core.allocator());
+    order.ensureTotalCapacity(app_core.allocator(), app.project.files.items.len) catch return;
+    const open_order = buildOpenWindowOrder(&order);
+    if (open_order.len == 0) return;
 
-    const cols: usize = @max(1, @as(usize, @intFromFloat(@ceil(std.math.sqrt(@as(f64, @floatFromInt(count)))))));
-    const width: f32 = 500;
-    const height: f32 = 400;
-    const gap: f32 = 20;
+    const viewport = canvasViewportRect();
+    const count = open_order.len;
+    const count_f = @as(f64, @floatFromInt(count));
+    const aspect = @as(f64, @floatCast(@max(viewport.w, 1.0) / @max(viewport.h, 1.0)));
+    const cols = @max(1, @min(count, @as(usize, @intFromFloat(@ceil(@sqrt(count_f * aspect))))));
+    const rows = std.math.divCeil(usize, count, cols) catch unreachable;
 
-    var nth_open: usize = 0;
-    for (app.project.files.items) |*file| {
-        if (!file.window_open) continue;
+    const slot_w = @max(min_window_w, (viewport.w - layout_margin * 2.0 - @as(f32, @floatFromInt(cols - 1)) * layout_gap) / @as(f32, @floatFromInt(cols)));
+    const slot_h = @max(min_window_h, (viewport.h - layout_margin * 2.0 - @as(f32, @floatFromInt(rows - 1)) * layout_gap) / @as(f32, @floatFromInt(rows)));
 
-        const col = nth_open % cols;
-        const row = nth_open / cols;
+    for (open_order, 0..) |file_index, pos| {
+        const col = pos % cols;
+        const row = pos / cols;
+        var file = &app.project.files.items[file_index];
+        const width = @min(@max(file.window_rect.w, min_window_w), slot_w);
+        const height = @min(@max(file.window_rect.h, min_window_h), slot_h);
+        const cell_x = viewport.x + layout_margin + @as(f32, @floatFromInt(col)) * (slot_w + layout_gap);
+        const cell_y = viewport.y + layout_margin + @as(f32, @floatFromInt(row)) * (slot_h + layout_gap);
+
         file.window_rect = .{
-            .x = 100 + @as(f32, @floatFromInt(col)) * (width + gap),
-            .y = 100 + @as(f32, @floatFromInt(row)) * (height + gap),
+            .x = cell_x + (slot_w - width) * 0.5,
+            .y = cell_y + (slot_h - height) * 0.5,
             .w = width,
             .h = height,
         };
-        nth_open += 1;
+        file.window_home_rect = file.window_rect;
+        file.window_velocity = .{};
+    }
+}
+
+pub fn commitWindowHome(index: usize) void {
+    if (index >= app.project.files.items.len) return;
+
+    var file = &app.project.files.items[index];
+    file.window_home_rect = file.window_rect;
+    file.window_velocity = .{};
+}
+
+pub fn commitAllWindowHomes() void {
+    for (app.project.files.items) |*file| {
+        if (!file.window_open) continue;
+        file.window_home_rect = file.window_rect;
+        file.window_velocity = .{};
     }
 }
 
@@ -148,6 +185,114 @@ pub fn rectsOverlap(a: app_core.Rect, b: app_core.Rect) bool {
 
 pub fn sameRect(a: app_core.Rect, b: app_core.Rect) bool {
     return a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h;
+}
+
+pub fn findNearestFreeRect(preferred: app_core.Rect, skip_index: ?usize) app_core.Rect {
+    const viewport = canvasViewportRect();
+    const visible_preferred = clampRectToViewport(preferred, viewport);
+
+    if (!anyOpenWindowOverlaps(visible_preferred, skip_index)) {
+        return visible_preferred;
+    }
+
+    if (findSpiralFreeRect(visible_preferred, skip_index, viewport, true, visible_spawn_rings)) |candidate| {
+        return candidate;
+    }
+
+    if (findSpiralFreeRect(visible_preferred, skip_index, viewport, false, fallback_spawn_rings)) |candidate| {
+        return candidate;
+    }
+
+    return visible_preferred;
+}
+
+pub fn constrainRectToOpenSpace(current_rect: app_core.Rect, target_rect: app_core.Rect, skip_index: ?usize) app_core.Rect {
+    if (sameRect(current_rect, target_rect)) return current_rect;
+    if (!anyOpenWindowOverlaps(target_rect, skip_index)) return target_rect;
+    if (anyOpenWindowOverlaps(current_rect, skip_index)) return findNearestFreeRect(target_rect, skip_index);
+
+    var lo: f32 = 0.0;
+    var hi: f32 = 1.0;
+    var best = current_rect;
+    var step: usize = 0;
+    while (step < collision_search_steps) : (step += 1) {
+        const mid = (lo + hi) * 0.5;
+        const candidate = lerpRect(current_rect, target_rect, mid);
+        if (anyOpenWindowOverlaps(candidate, skip_index)) {
+            hi = mid;
+        } else {
+            lo = mid;
+            best = candidate;
+        }
+    }
+
+    return best;
+}
+
+pub fn stepWindowPhysics() bool {
+    var order: std.ArrayList(usize) = .empty;
+    defer order.deinit(app_core.allocator());
+    order.ensureTotalCapacity(app_core.allocator(), app.project.files.items.len) catch return false;
+    const open_order = buildOpenWindowOrder(&order);
+    if (open_order.len == 0) return false;
+
+    const manipulated = app.manipulated_window;
+    const anchored = app.settling_anchor_window;
+    var needs_refresh = false;
+
+    for (open_order) |index| {
+        if (isFixedWindow(index, manipulated, anchored)) {
+            app.project.files.items[index].window_velocity = .{};
+            continue;
+        }
+
+        var file = &app.project.files.items[index];
+        const home_dx = file.window_home_rect.x - file.window_rect.x;
+        const home_dy = file.window_home_rect.y - file.window_rect.y;
+        const prev_rect = file.window_rect;
+
+        file.window_velocity.x = clampVelocity((file.window_velocity.x + home_dx * spring_pull) * spring_damping);
+        file.window_velocity.y = clampVelocity((file.window_velocity.y + home_dy * spring_pull) * spring_damping);
+        file.window_rect.x += file.window_velocity.x;
+        file.window_rect.y += file.window_velocity.y;
+
+        if (!sameRect(prev_rect, file.window_rect)) {
+            needs_refresh = true;
+        }
+    }
+
+    var iter: usize = 0;
+    while (iter < collision_iterations) : (iter += 1) {
+        var separated_any = false;
+
+        var i: usize = 0;
+        while (i < open_order.len) : (i += 1) {
+            const a_index = open_order[i];
+            if (!app.project.files.items[a_index].window_open) continue;
+
+            var j: usize = i + 1;
+            while (j < open_order.len) : (j += 1) {
+                const b_index = open_order[j];
+                if (!app.project.files.items[b_index].window_open) continue;
+
+                if (resolvePairOverlap(a_index, b_index, manipulated, anchored)) {
+                    separated_any = true;
+                    needs_refresh = true;
+                }
+            }
+        }
+
+        if (!separated_any) break;
+    }
+
+    for (open_order) |index| {
+        if (isFixedWindow(index, manipulated, anchored)) continue;
+        if (snapWindowToHome(index)) {
+            needs_refresh = true;
+        }
+    }
+
+    return needs_refresh or physicsStillActive(open_order, manipulated, anchored);
 }
 
 pub fn searchQuery() []const u8 {
@@ -298,4 +443,215 @@ pub fn checkQuit() bool {
         }
     }
     return keep_running;
+}
+
+fn canvasViewportRect() app_core.Rect {
+    if (app.canvas.scroll_info.viewport.empty()) {
+        return .{ .x = 100, .y = 80, .w = 1200, .h = 760 };
+    }
+
+    const scale = @max(app.canvas.scale, 0.001);
+    return .{
+        .x = app.canvas.scroll_info.viewport.x / scale + app.canvas.origin.x,
+        .y = app.canvas.scroll_info.viewport.y / scale + app.canvas.origin.y,
+        .w = app.canvas.scroll_info.viewport.w / scale,
+        .h = app.canvas.scroll_info.viewport.h / scale,
+    };
+}
+
+fn clampRectToViewport(rect: app_core.Rect, viewport: app_core.Rect) app_core.Rect {
+    return .{
+        .x = clampAxisToViewport(rect.x, rect.w, viewport.x, viewport.w),
+        .y = clampAxisToViewport(rect.y, rect.h, viewport.y, viewport.h),
+        .w = rect.w,
+        .h = rect.h,
+    };
+}
+
+fn clampAxisToViewport(pos: f32, size: f32, viewport_start: f32, viewport_size: f32) f32 {
+    const max_pos = viewport_start + viewport_size - size - layout_margin;
+    const min_pos = viewport_start + layout_margin;
+
+    if (max_pos >= min_pos) {
+        return std.math.clamp(pos, min_pos, max_pos);
+    }
+
+    return viewport_start + (viewport_size - size) * 0.5;
+}
+
+fn findSpiralFreeRect(base_rect: app_core.Rect, skip_index: ?usize, viewport: app_core.Rect, require_viewport_overlap: bool, max_rings: i32) ?app_core.Rect {
+    const step_x = @max(base_rect.w + layout_gap, min_window_w + layout_gap);
+    const step_y = @max(base_rect.h + layout_gap, min_window_h + layout_gap);
+
+    var ring: i32 = 0;
+    while (ring <= max_rings) : (ring += 1) {
+        var dy: i32 = -ring;
+        while (dy <= ring) : (dy += 1) {
+            var dx: i32 = -ring;
+            while (dx <= ring) : (dx += 1) {
+                if (ring != 0 and dx != -ring and dx != ring and dy != -ring and dy != ring) continue;
+
+                const candidate = app_core.Rect{
+                    .x = base_rect.x + @as(f32, @floatFromInt(dx)) * step_x,
+                    .y = base_rect.y + @as(f32, @floatFromInt(dy)) * step_y,
+                    .w = base_rect.w,
+                    .h = base_rect.h,
+                };
+
+                if (require_viewport_overlap and !rectsOverlap(candidate, viewport)) continue;
+                if (!anyOpenWindowOverlaps(candidate, skip_index)) return candidate;
+            }
+        }
+    }
+
+    return null;
+}
+
+fn lerpRect(a: app_core.Rect, b: app_core.Rect, t: f32) app_core.Rect {
+    return .{
+        .x = std.math.lerp(a.x, b.x, t),
+        .y = std.math.lerp(a.y, b.y, t),
+        .w = std.math.lerp(a.w, b.w, t),
+        .h = std.math.lerp(a.h, b.h, t),
+    };
+}
+
+fn resolvePairOverlap(a_index: usize, b_index: usize, manipulated: ?usize, anchored: ?usize) bool {
+    const a_rect = app.project.files.items[a_index].window_rect;
+    const b_rect = app.project.files.items[b_index].window_rect;
+    const correction = overlapCorrection(a_index, b_index, a_rect, b_rect) orelse return false;
+
+    const a_fixed = isFixedWindow(a_index, manipulated, anchored);
+    const b_fixed = isFixedWindow(b_index, manipulated, anchored);
+
+    if (a_fixed and b_fixed) return false;
+
+    if (a_fixed) {
+        applyCollisionOffset(b_index, correction.x, correction.y);
+    } else if (b_fixed) {
+        applyCollisionOffset(a_index, -correction.x, -correction.y);
+    } else {
+        applyCollisionOffset(a_index, -correction.x * 0.5, -correction.y * 0.5);
+        applyCollisionOffset(b_index, correction.x * 0.5, correction.y * 0.5);
+    }
+
+    return true;
+}
+
+fn overlapCorrection(a_index: usize, b_index: usize, a_rect: app_core.Rect, b_rect: app_core.Rect) ?app_core.Point {
+    const a_center = rectCenter(a_rect);
+    const b_center = rectCenter(b_rect);
+    const dx = b_center.x - a_center.x;
+    const dy = b_center.y - a_center.y;
+    const overlap_x = (a_rect.w + b_rect.w) * 0.5 - @abs(dx);
+    const overlap_y = (a_rect.h + b_rect.h) * 0.5 - @abs(dy);
+    if (overlap_x <= 0.0 or overlap_y <= 0.0) return null;
+
+    const a_home = rectCenter(app.project.files.items[a_index].window_home_rect);
+    const b_home = rectCenter(app.project.files.items[b_index].window_home_rect);
+    const dir_x = axisSign(dx, b_home.x - a_home.x, a_index < b_index);
+    const dir_y = axisSign(dy, b_home.y - a_home.y, true);
+
+    const basis_x = overlap_y;
+    const basis_y = overlap_x;
+    const basis_len = std.math.sqrt(basis_x * basis_x + basis_y * basis_y);
+    if (basis_len <= 0.0001) {
+        return if (overlap_x <= overlap_y)
+            .{ .x = dir_x * overlap_x, .y = 0.0 }
+        else
+            .{ .x = 0.0, .y = dir_y * overlap_y };
+    }
+
+    const magnitude = @min(overlap_x, overlap_y) + 0.01;
+    return .{
+        .x = dir_x * (basis_x / basis_len) * magnitude,
+        .y = dir_y * (basis_y / basis_len) * magnitude,
+    };
+}
+
+fn applyCollisionOffset(index: usize, dx: f32, dy: f32) void {
+    if (dx == 0.0 and dy == 0.0) return;
+
+    var file = &app.project.files.items[index];
+    file.window_rect.x += dx;
+    file.window_rect.y += dy;
+    file.window_velocity.x = clampVelocity(file.window_velocity.x + dx * collision_velocity_transfer);
+    file.window_velocity.y = clampVelocity(file.window_velocity.y + dy * collision_velocity_transfer);
+}
+
+fn snapWindowToHome(index: usize) bool {
+    var file = &app.project.files.items[index];
+    const close_x = @abs(file.window_home_rect.x - file.window_rect.x) <= settle_position_epsilon;
+    const close_y = @abs(file.window_home_rect.y - file.window_rect.y) <= settle_position_epsilon;
+    const slow_x = @abs(file.window_velocity.x) <= settle_velocity_epsilon;
+    const slow_y = @abs(file.window_velocity.y) <= settle_velocity_epsilon;
+    if (!(close_x and close_y and slow_x and slow_y)) return false;
+    if (anyOpenWindowOverlaps(file.window_home_rect, index)) return false;
+
+    if (file.window_rect.x == file.window_home_rect.x and
+        file.window_rect.y == file.window_home_rect.y and
+        file.window_velocity.x == 0.0 and
+        file.window_velocity.y == 0.0)
+    {
+        return false;
+    }
+
+    file.window_rect.x = file.window_home_rect.x;
+    file.window_rect.y = file.window_home_rect.y;
+    file.window_velocity = .{};
+    return true;
+}
+
+fn physicsStillActive(open_order: []const usize, manipulated: ?usize, anchored: ?usize) bool {
+    for (open_order) |index| {
+        if (isFixedWindow(index, manipulated, anchored)) continue;
+
+        const file = app.project.files.items[index];
+        if (@abs(file.window_home_rect.x - file.window_rect.x) > settle_position_epsilon) return true;
+        if (@abs(file.window_home_rect.y - file.window_rect.y) > settle_position_epsilon) return true;
+        if (@abs(file.window_velocity.x) > settle_velocity_epsilon) return true;
+        if (@abs(file.window_velocity.y) > settle_velocity_epsilon) return true;
+    }
+
+    var i: usize = 0;
+    while (i < open_order.len) : (i += 1) {
+        const a_index = open_order[i];
+        if (!app.project.files.items[a_index].window_open) continue;
+
+        var j: usize = i + 1;
+        while (j < open_order.len) : (j += 1) {
+            const b_index = open_order[j];
+            if (!app.project.files.items[b_index].window_open) continue;
+            if (rectsOverlap(app.project.files.items[a_index].window_rect, app.project.files.items[b_index].window_rect)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+fn rectCenter(rect: app_core.Rect) app_core.Point {
+    return .{
+        .x = rect.x + rect.w * 0.5,
+        .y = rect.y + rect.h * 0.5,
+    };
+}
+
+fn axisSign(primary: f32, secondary: f32, default_positive: bool) f32 {
+    if (primary > 0.001) return 1.0;
+    if (primary < -0.001) return -1.0;
+    if (secondary > 0.001) return 1.0;
+    if (secondary < -0.001) return -1.0;
+    return if (default_positive) 1.0 else -1.0;
+}
+
+fn clampVelocity(value: f32) f32 {
+    return std.math.clamp(value, -max_window_speed, max_window_speed);
+}
+
+fn isFixedWindow(index: usize, manipulated: ?usize, anchored: ?usize) bool {
+    if (manipulated != null and manipulated.? == index) return true;
+    if (anchored != null and anchored.? == index) return true;
+    return false;
 }

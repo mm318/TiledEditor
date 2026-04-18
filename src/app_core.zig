@@ -134,6 +134,8 @@ pub const EditorFile = struct {
     content: []u8 = &.{},
     window_open: bool = false,
     window_rect: Rect = .{},
+    window_home_rect: Rect = .{},
+    window_velocity: Point = .{},
     z_index: usize = 0,
 
     pub fn deinit(self: *EditorFile, gpa: std.mem.Allocator) void {
@@ -226,6 +228,8 @@ pub const AppState = struct {
     pending_focus_file: ?usize = null,
     pending_editor_focus: ?usize = null,
     pending_search_focus: bool = false,
+    manipulated_window: ?usize = null,
+    settling_anchor_window: ?usize = null,
     last_active_file: ?usize = null,
     next_z_index: usize = 1,
     search_buf: [256]u8 = [_]u8{0} ** 256,
@@ -386,6 +390,7 @@ fn loadProjectFromPath(project_path: []const u8) !ProjectState {
         const initial_idx = preferredInitialFile(project.files.items);
         project.files.items[initial_idx].window_open = true;
         project.files.items[initial_idx].window_rect = .{ .x = 100, .y = 100, .w = 500, .h = 400 };
+        project.files.items[initial_idx].window_home_rect = project.files.items[initial_idx].window_rect;
         project.files.items[initial_idx].z_index = 1;
     }
 

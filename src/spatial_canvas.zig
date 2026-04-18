@@ -75,7 +75,7 @@ pub fn drawSpatialCanvas() void {
     scroll_area.deinit();
 
     updateCanvasBounds(scroll_container_id, scroll_rect_scale, bounds);
-    resolveWindowCollisions(app.previous_rects.items);
+    resolveWindowCollisions(scroll_container_id);
 
     if (app.last_active_file) |idx| {
         if (!app.project.files.items[idx].window_open) {
@@ -429,6 +429,13 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                 if (me.action == .press and me.button.pointer()) {
                     e.handle(@src(), &meta.close_wd);
                     file.window_open = false;
+                    file.window_velocity = .{};
+                    if (app.manipulated_window != null and app.manipulated_window.? == meta.index) {
+                        app.manipulated_window = null;
+                    }
+                    if (app.settling_anchor_window != null and app.settling_anchor_window.? == meta.index) {
+                        app.settling_anchor_window = null;
+                    }
                     if (app.last_active_file != null and app.last_active_file.? == meta.index) {
                         app.last_active_file = workspace.firstOpenFile();
                     }
@@ -440,7 +447,11 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
             if ((on_border and !captured_here) or (captured_here and app.resize_edges.any())) {
                 if (me.action == .press and me.button.pointer()) {
                     e.handle(@src(), &meta.frame_wd);
+                    workspace.commitAllWindowHomes();
                     app.resize_edges = edges;
+                    app.manipulated_window = meta.index;
+                    app.settling_anchor_window = meta.index;
+                    file.window_velocity = .{};
                     dvui.captureMouse(&meta.frame_wd, e.num);
                     dvui.dragPreStart(me.p, .{
                         .cursor = edges.cursor(),
@@ -450,6 +461,9 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                 } else if (me.action == .release and me.button.pointer() and captured_here) {
                     e.handle(@src(), &meta.frame_wd);
                     app.resize_edges = .{};
+                    workspace.commitWindowHome(meta.index);
+                    app.manipulated_window = null;
+                    app.settling_anchor_window = meta.index;
                     dvui.captureMouse(null, e.num);
                     dvui.dragEnd();
                 } else if (me.action == .motion and captured_here) {
@@ -457,29 +471,32 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                         e.handle(@src(), &meta.frame_wd);
                         const mp = data_rect_scale.pointFromPhysical(me.p);
                         const re = app.resize_edges;
-                        var r = file.window_rect;
+                        var target_rect = file.window_rect;
 
                         if (re.right) {
-                            r.w = @max(mp.x - r.x, min_window_w);
+                            target_rect.w = @max(mp.x - target_rect.x, min_window_w);
                         }
                         if (re.bottom) {
-                            r.h = @max(mp.y - r.y, min_window_h);
+                            target_rect.h = @max(mp.y - target_rect.y, min_window_h);
                         }
                         if (re.left) {
-                            const right_edge = r.x + r.w;
+                            const right_edge = target_rect.x + target_rect.w;
                             const new_x = @min(mp.x, right_edge - min_window_w);
-                            r.w = right_edge - new_x;
-                            r.x = new_x;
+                            target_rect.w = right_edge - new_x;
+                            target_rect.x = new_x;
                         }
                         if (re.top) {
-                            const bottom_edge = r.y + r.h;
+                            const bottom_edge = target_rect.y + target_rect.h;
                             const new_y = @min(mp.y, bottom_edge - min_window_h);
-                            r.h = bottom_edge - new_y;
-                            r.y = new_y;
+                            target_rect.h = bottom_edge - new_y;
+                            target_rect.y = new_y;
                         }
 
-                        file.window_rect = r;
-                        dvui.refresh(null, @src(), scroll_container.data().id);
+                        if (!workspace.sameRect(target_rect, file.window_rect)) {
+                            file.window_rect = target_rect;
+                            file.window_velocity = .{};
+                            dvui.refresh(null, @src(), scroll_container.data().id);
+                        }
                     }
                 }
                 break;
@@ -488,6 +505,10 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
             if (header_rect.contains(me.p) or captured_here) {
                 if (me.action == .press and me.button.pointer()) {
                     e.handle(@src(), &meta.header_wd);
+                    workspace.commitAllWindowHomes();
+                    app.manipulated_window = meta.index;
+                    app.settling_anchor_window = meta.index;
+                    file.window_velocity = .{};
                     dvui.captureMouse(&meta.frame_wd, e.num);
                     dvui.dragPreStart(me.p, .{
                         .cursor = .arrow_all,
@@ -496,6 +517,9 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                     dvui.refresh(null, @src(), scroll_container.data().id);
                 } else if (me.action == .release and me.button.pointer() and captured_here) {
                     e.handle(@src(), &meta.frame_wd);
+                    workspace.commitWindowHome(meta.index);
+                    app.manipulated_window = null;
+                    app.settling_anchor_window = meta.index;
                     dvui.captureMouse(null, e.num);
                     dvui.dragEnd();
                 } else if (me.action == .motion and captured_here) {
@@ -503,9 +527,17 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
                         e.handle(@src(), &meta.frame_wd);
                         const top_left = me.p.diff(dvui.dragOffset());
                         const next_pos = data_rect_scale.pointFromPhysical(top_left);
-                        file.window_rect.x = next_pos.x;
-                        file.window_rect.y = next_pos.y;
-                        dvui.refresh(null, @src(), scroll_container.data().id);
+                        const target_rect = app_core.Rect{
+                            .x = next_pos.x,
+                            .y = next_pos.y,
+                            .w = file.window_rect.w,
+                            .h = file.window_rect.h,
+                        };
+                        if (!workspace.sameRect(target_rect, file.window_rect)) {
+                            file.window_rect = target_rect;
+                            file.window_velocity = .{};
+                            dvui.refresh(null, @src(), scroll_container.data().id);
+                        }
 
                         dvui.scrollDrag(.{
                             .mouse_pt = me.p,
@@ -657,17 +689,12 @@ fn updateCanvasBounds(scroll_id: dvui.Id, scroll_rect_scale: anytype, bounds: ?R
     }
 }
 
-fn resolveWindowCollisions(previous_rects: []const Rect) void {
-    for (app.project.files.items, 0..) |*file, i| {
-        if (!file.window_open) continue;
-        if (workspace.sameRect(previous_rects[i], file.window_rect)) continue;
-
-        for (app.project.files.items, 0..) |other, j| {
-            if (i == j or !other.window_open) continue;
-            if (workspace.rectsOverlap(file.window_rect, other.window_rect)) {
-                file.window_rect = previous_rects[i];
-                break;
-            }
-        }
+fn resolveWindowCollisions(scroll_id: dvui.Id) void {
+    const physics_active = workspace.stepWindowPhysics();
+    if (physics_active) {
+        dvui.refresh(null, @src(), scroll_id);
+    } else if (app.manipulated_window == null) {
+        workspace.commitAllWindowHomes();
+        app.settling_anchor_window = null;
     }
 }
