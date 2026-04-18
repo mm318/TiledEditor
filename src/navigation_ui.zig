@@ -306,7 +306,14 @@ pub fn drawFooter() void {
         .border = .{ .y = 1 },
         .padding = .{ .x = 12, .y = 2, .w = 12, .h = 2 },
     });
-    defer footer.deinit();
+
+    const footer_rs = footer.data().rectScale();
+    dvui.subwindowAdd(footer.data().id, footer.data().rect, footer_rs.r, false, null, true);
+    const prev_sw = dvui.subwindowCurrentSet(footer.data().id, .cast(footer.data().rect));
+    defer {
+        _ = dvui.subwindowCurrentSet(prev_sw.id, prev_sw.rect);
+        footer.deinit();
+    }
 
     {
         var left = dvui.box(@src(), .{ .dir = .horizontal }, .{

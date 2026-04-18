@@ -305,11 +305,25 @@ fn drawEditorTextEntry(index: usize, file: *app_core.EditorFile) void {
         .font = Font.theme(.mono).larger(-1),
         .color_text = palette.text_dim,
     });
+    const current_sw = dvui.subwindowCurrentId();
 
-    if (dvui.focusedWidgetId() != te.data().id) {
-        dvui.focusWidget(te.data().id, null, null);
+    if (app.pending_editor_focus != null and app.pending_editor_focus.? == index) {
+        if (dvui.focusedWidgetId() != te.data().id) {
+            dvui.focusSubwindow(current_sw, null);
+            dvui.focusWidget(te.data().id, current_sw, null);
+        }
+        app.pending_editor_focus = null;
     }
     cw.scroll_to_focused = false;
+
+    for (dvui.events()) |*e| {
+        if (e.handled or !te.matchEvent(e) or e.evt != .mouse) continue;
+        const me = e.evt.mouse;
+        if (me.action == .focus) {
+            dvui.focusSubwindow(current_sw, e.num);
+            break;
+        }
+    }
 
     for (dvui.events()) |*e| {
         if (e.handled or e.evt != .key) continue;

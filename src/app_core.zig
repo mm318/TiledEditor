@@ -144,16 +144,37 @@ pub const EditorFile = struct {
     }
 };
 
+pub const FolderNode = struct {
+    name: []const u8 = "",
+    relative_path: []const u8 = "",
+    open: bool = true,
+    folders: std.ArrayList(FolderNode) = .empty,
+    file_indices: std.ArrayList(usize) = .empty,
+
+    pub fn deinit(self: *FolderNode, gpa: std.mem.Allocator) void {
+        for (self.folders.items) |*folder| {
+            folder.deinit(gpa);
+        }
+        self.folders.deinit(gpa);
+        self.file_indices.deinit(gpa);
+        if (self.name.len != 0) gpa.free(self.name);
+        if (self.relative_path.len != 0) gpa.free(self.relative_path);
+        self.* = .{};
+    }
+};
+
 pub const ProjectState = struct {
     name: []const u8 = "",
     root_path: []const u8 = "",
     files: std.ArrayList(EditorFile) = .empty,
+    tree: FolderNode = .{},
 
     pub fn deinit(self: *ProjectState, gpa: std.mem.Allocator) void {
         for (self.files.items) |*file| {
             file.deinit(gpa);
         }
         self.files.deinit(gpa);
+        self.tree.deinit(gpa);
         if (self.name.len != 0) gpa.free(self.name);
         if (self.root_path.len != 0) gpa.free(self.root_path);
         self.* = .{};
@@ -203,9 +224,11 @@ pub const AppState = struct {
     explorer_root_open: bool = true,
     rail_mode: RailMode = .explorer,
     pending_focus_file: ?usize = null,
+    pending_editor_focus: ?usize = null,
+    pending_search_focus: bool = false,
     last_active_file: ?usize = null,
     next_z_index: usize = 1,
-    search_buf: [96]u8 = [_]u8{0} ** 96,
+    search_buf: [256]u8 = [_]u8{0} ** 256,
     project: ProjectState = .{},
     canvas: CanvasState = .{},
     resize_edges: ResizeEdges = .{},
@@ -357,6 +380,8 @@ fn loadProjectFromPath(project_path: []const u8) !ProjectState {
         }
     }.lessThan);
 
+    project.tree = try buildProjectTree(project.files.items);
+
     if (project.files.items.len != 0) {
         const initial_idx = preferredInitialFile(project.files.items);
         project.files.items[initial_idx].window_open = true;
@@ -393,6 +418,49 @@ fn makeProjectRootPath(project_path: []const u8) ![]u8 {
         return allocator().dupe(u8, cwd);
     }
     return allocator().dupe(u8, project_path);
+}
+
+fn buildProjectTree(files: []const EditorFile) !FolderNode {
+    var root: FolderNode = .{};
+    errdefer root.deinit(allocator());
+
+    for (files, 0..) |file, i| {
+        try addFileToTree(&root, i, file.path);
+    }
+
+    return root;
+}
+
+fn addFileToTree(root: *FolderNode, file_index: usize, file_path: []const u8) !void {
+    const dir_path = std.fs.path.dirname(file_path) orelse "";
+    var current = root;
+    var parts = std.mem.tokenizeScalar(u8, dir_path, std.fs.path.sep);
+    while (parts.next()) |segment| {
+        current = try ensureFolderChild(current, segment);
+    }
+    try current.file_indices.append(allocator(), file_index);
+}
+
+fn ensureFolderChild(parent: *FolderNode, name: []const u8) !*FolderNode {
+    for (parent.folders.items) |*child| {
+        if (std.mem.eql(u8, child.name, name)) return child;
+    }
+
+    const child_name = try allocator().dupe(u8, name);
+    errdefer allocator().free(child_name);
+
+    const relative_path = if (parent.relative_path.len == 0)
+        try allocator().dupe(u8, name)
+    else
+        try std.fmt.allocPrint(allocator(), "{s}{c}{s}", .{ parent.relative_path, std.fs.path.sep, name });
+    errdefer allocator().free(relative_path);
+
+    try parent.folders.append(allocator(), .{
+        .name = child_name,
+        .relative_path = relative_path,
+        .open = true,
+    });
+    return &parent.folders.items[parent.folders.items.len - 1];
 }
 
 fn shouldSkipDirectory(name: []const u8) bool {

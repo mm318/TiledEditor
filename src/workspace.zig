@@ -4,15 +4,27 @@ const app_core = @import("app_core.zig");
 
 const app = &app_core.app;
 
+pub const TextSearchMatch = struct {
+    line_number: usize,
+    line_start: usize,
+    line_end: usize,
+    match_start: usize,
+    match_end: usize,
+};
+
 pub fn openFile(index: usize) void {
     if (app.project.files.items[index].window_open) {
         app.pending_focus_file = index;
+        app.pending_editor_focus = index;
+        app.pending_search_focus = false;
         return;
     }
 
     app.project.files.items[index].window_open = true;
     app.project.files.items[index].window_rect = findSpawnRect();
     app.pending_focus_file = index;
+    app.pending_editor_focus = index;
+    app.pending_search_focus = false;
 }
 
 pub fn bringFileToFront(index: usize) void {
@@ -42,7 +54,10 @@ pub fn cycleFocusWindow() void {
     }
 
     const next_pos = if (current_pos) |pos| (pos + 1) % order_items.len else 0;
-    bringFileToFront(order_items[next_pos]);
+    const next_file = order_items[next_pos];
+    bringFileToFront(next_file);
+    app.pending_editor_focus = next_file;
+    app.pending_search_focus = false;
 }
 
 pub fn buildOpenWindowOrder(order: *std.ArrayList(usize)) []usize {
@@ -139,22 +154,71 @@ pub fn searchQuery() []const u8 {
     return std.mem.sliceTo(app.search_buf[0..], 0);
 }
 
-pub fn matchesSearch(file: *const app_core.EditorFile, query: []const u8) bool {
-    if (query.len == 0) return true;
-    return containsIgnoreCase(file.name, query) or containsIgnoreCase(file.path, query);
+pub fn findTextSearchMatch(file: *const app_core.EditorFile, query: []const u8) ?TextSearchMatch {
+    if (query.len == 0) return null;
+
+    const text = app_core.fileText(file);
+    const match_start = indexOfIgnoreCase(text, query) orelse return null;
+    const match_end = match_start + query.len;
+
+    const line_start = if (std.mem.lastIndexOfScalar(u8, text[0..match_start], '\n')) |idx|
+        idx + 1
+    else
+        0;
+    const line_end = std.mem.indexOfScalarPos(u8, text, match_end, '\n') orelse text.len;
+
+    return .{
+        .line_number = 1 + std.mem.count(u8, text[0..match_start], "\n"),
+        .line_start = line_start,
+        .line_end = line_end,
+        .match_start = match_start,
+        .match_end = match_end,
+    };
 }
 
 pub fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
-    if (needle.len == 0) return true;
-    if (needle.len > haystack.len) return false;
+    return indexOfIgnoreCase(haystack, needle) != null;
+}
+
+pub fn indexOfIgnoreCase(haystack: []const u8, needle: []const u8) ?usize {
+    if (needle.len == 0) return 0;
+    if (needle.len > haystack.len) return null;
 
     var i: usize = 0;
     while (i + needle.len <= haystack.len) : (i += 1) {
         if (std.ascii.eqlIgnoreCase(haystack[i .. i + needle.len], needle)) {
-            return true;
+            return i;
         }
     }
-    return false;
+    return null;
+}
+
+pub fn searchMatchPreview(buffer: []u8, file: *const app_core.EditorFile, match: TextSearchMatch) []const u8 {
+    const context_before: usize = 28;
+    const context_after: usize = 60;
+    const line = app_core.fileText(file)[match.line_start..match.line_end];
+    const match_offset = match.match_start - match.line_start;
+
+    const snippet_start = if (match_offset > context_before) match_offset - context_before else 0;
+    const trailing_match = match_offset + (match.match_end - match.match_start);
+    const snippet_end = @min(line.len, trailing_match + context_after);
+
+    var out_len: usize = 0;
+    if (snippet_start > 0) {
+        buffer[out_len..][0..3].* = "...".*;
+        out_len += 3;
+    }
+
+    const body = std.mem.trim(u8, line[snippet_start..snippet_end], &std.ascii.whitespace);
+    @memcpy(buffer[out_len..][0..body.len], body);
+    out_len += body.len;
+
+    if (snippet_end < line.len) {
+        buffer[out_len..][0..3].* = "...".*;
+        out_len += 3;
+    }
+
+    return buffer[0..out_len];
 }
 
 pub fn countLines(text: []const u8) usize {
@@ -174,6 +238,16 @@ pub fn fileAccentColor(language: app_core.Language) app_core.Color {
 
 pub fn iconColor(path: []const u8) app_core.Color {
     return fileAccentColor(app_core.languageForPath(path));
+}
+
+pub fn languageLabel(language: app_core.Language) []const u8 {
+    return switch (language) {
+        .cpp => "C++",
+        .yaml => "YAML",
+        .markdown => "Markdown",
+        .zig => "Zig",
+        .text => "Text",
+    };
 }
 
 pub fn fileVirtualRect(r: app_core.Rect) app_core.Rect {
@@ -205,13 +279,7 @@ pub fn activeFile() ?usize {
 
 pub fn activeLanguageLabel() []const u8 {
     if (activeFile()) |idx| {
-        return switch (app.project.files.items[idx].language) {
-            .cpp => "C++",
-            .yaml => "YAML",
-            .markdown => "Markdown",
-            .zig => "Zig",
-            .text => "Text",
-        };
+        return languageLabel(app.project.files.items[idx].language);
     }
     return "Spatial";
 }
