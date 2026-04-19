@@ -396,12 +396,13 @@ fn processEditorWindowInteractions(metas: []const WindowRenderMeta, scroll_conta
         if (e.handled or e.evt != .mouse) continue;
 
         const me = e.evt.mouse;
-        if (me.floating_win != dvui.subwindowCurrentId()) continue;
         var i = metas.len;
         while (i > 0) : (i -= 1) {
             const meta = metas[i - 1];
             const frame_rect = meta.frame_wd.borderRectScale().r;
             const captured_here = dvui.captured(meta.frame_wd.id);
+
+            if (!captured_here and me.floating_win != dvui.subwindowCurrentId()) continue;
 
             if (!captured_here and !frame_rect.contains(me.p)) continue;
 
