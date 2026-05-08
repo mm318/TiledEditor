@@ -1,6 +1,7 @@
 const std = @import("std");
 const dvui = @import("dvui");
 const app_core = @import("app_core.zig");
+const syntax_treesitter = @import("syntax_treesitter.zig");
 
 const app = &app_core.app;
 const min_window_w: f32 = 180.0;
@@ -409,6 +410,10 @@ pub fn languageLabel(language: app_core.Language) []const u8 {
     };
 }
 
+pub fn fileLanguageLabel(path: []const u8, language: app_core.Language) []const u8 {
+    return syntax_treesitter.displayNameForPath(path) orelse languageLabel(language);
+}
+
 pub fn fileVirtualRect(r: app_core.Rect) app_core.Rect {
     return .{
         .x = (r.x - app.canvas.origin.x) * app.canvas.scale,
@@ -438,7 +443,8 @@ pub fn activeFile() ?usize {
 
 pub fn activeLanguageLabel() []const u8 {
     if (activeFile()) |idx| {
-        return languageLabel(app.project.files.items[idx].language);
+        const file = &app.project.files.items[idx];
+        return fileLanguageLabel(file.path, file.language);
     }
     return "Spatial";
 }

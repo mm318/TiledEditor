@@ -1,6 +1,7 @@
 const std = @import("std");
 const dvui = @import("dvui");
 const app_core = @import("app_core.zig");
+const syntax_treesitter = @import("syntax_treesitter.zig");
 const workspace = @import("workspace.zig");
 
 const Font = app_core.Font;
@@ -289,7 +290,9 @@ fn drawEditorTextEntry(index: usize, file: *app_core.EditorFile) void {
     te.init(@src(), .{
         .multiline = true,
         .break_lines = true,
+        .cache_layout = true,
         .scroll_horizontal = false,
+        .tree_sitter = syntax_treesitter.textEntryTreeSitter(file.path),
         .text = .{ .buffer_dynamic = .{
             .backing = &file.content,
             .allocator = app_core.allocator(),
@@ -337,31 +340,34 @@ fn drawEditorTextEntry(index: usize, file: *app_core.EditorFile) void {
 
     te.processEvents();
     cw.scroll_to_focused = false;
-
-    te.drawBeforeText();
-    te.textLayout.addText(te.text[0..te.len], te.data().options.strip());
-    te.textLayout.addTextDone(te.data().options.strip());
-    if (te.data().id == dvui.focusedWidgetId()) {
-        te.drawCursor();
-    }
-    dvui.clipSet(te.prevClip);
-
+    te.draw();
     te.deinit();
 }
 
-fn drawEditorPreview(index: usize, file: *const app_core.EditorFile) void {
-    var tl = dvui.textLayout(@src(), .{}, .{
+fn drawEditorPreview(index: usize, file: *app_core.EditorFile) void {
+    var te: dvui.TextEntryWidget = undefined;
+    te.init(@src(), .{
+        .multiline = true,
+        .break_lines = true,
+        .cache_layout = true,
+        .scroll_vertical = false,
+        .scroll_vertical_bar = .hide,
+        .scroll_horizontal = false,
+        .scroll_horizontal_bar = .hide,
+        .tree_sitter = syntax_treesitter.textEntryTreeSitter(file.path),
+        .text = .{ .buffer = file.content },
+    }, .{
         .id_extra = 40_000 + index,
         .expand = .both,
         .background = false,
+        .border = .{},
+        .margin = .{},
         .padding = .{ .x = 12, .y = 10, .w = 12, .h = 10 },
         .font = Font.theme(.mono).larger(-1),
-    });
-    defer tl.deinit();
-
-    tl.addText(app_core.fileText(file), .{
         .color_text = palette.text_soft.opacity(0.95),
     });
+    defer te.deinit();
+    te.draw();
 }
 
 fn detectResizeEdges(frame_rect: Rect.Physical, p: Point.Physical) app_core.ResizeEdges {

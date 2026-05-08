@@ -20,6 +20,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .backend = .sdl3gpu,
     });
+    const ts_pack_dep = b.dependency("tree_sitter_language_pack", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const exe = b.addExecutable(.{
         .name = "monolith",
@@ -31,6 +35,7 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("dvui", dvui_dep.module("dvui_sdl3gpu"));
     exe.root_module.addImport("sdl3gpu-backend", dvui_dep.module("sdl3"));
+    exe.root_module.addImport("tree_sitter_language_pack", ts_pack_dep.module("tree_sitter_language_pack"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

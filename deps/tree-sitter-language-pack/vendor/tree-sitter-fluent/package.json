@@ -1,0 +1,22 @@
+{
+  "name": "tree-sitter-fluent",
+  "version": "0.12.0",
+  "description": "Fluent grammar for tree-sitter",
+  "main": "index.js",
+  "keywords": [
+    "parser",
+    "fluent"
+  ],
+  "author": "Max Brunsfeld <maxbrunsfeld@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.10.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.12.7"
+  },
+  "scripts": {
+    "build": "tree-sitter generate && node-gyp build",
+    "test": "tree-sitter test"
+  }
+}

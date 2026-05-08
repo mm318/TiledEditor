@@ -524,7 +524,7 @@ fn searchResultRow(id_extra: usize, file_index: usize, file: *const app_core.Edi
             .color_text = palette.text_dim,
         });
 
-        drawLanguageBadge(file_index, file.language);
+        drawLanguageBadge(file_index, file.path, file.language);
     }
 
     const clicked = bw.clicked();
@@ -533,7 +533,7 @@ fn searchResultRow(id_extra: usize, file_index: usize, file: *const app_core.Edi
     return clicked;
 }
 
-fn drawLanguageBadge(id_extra: usize, language: app_core.Language) void {
+fn drawLanguageBadge(id_extra: usize, path: []const u8, language: app_core.Language) void {
     const accent = workspace.fileAccentColor(language);
 
     var badge = dvui.box(@src(), .{}, .{
@@ -548,7 +548,7 @@ fn drawLanguageBadge(id_extra: usize, language: app_core.Language) void {
     });
     defer badge.deinit();
 
-    dvui.labelNoFmt(@src(), workspace.languageLabel(language), .{}, .{
+    dvui.labelNoFmt(@src(), workspace.fileLanguageLabel(path, language), .{}, .{
         .id_extra = 61_000 + id_extra,
         .font = Font.theme(.body).larger(-3).withWeight(.bold),
         .color_text = accent,

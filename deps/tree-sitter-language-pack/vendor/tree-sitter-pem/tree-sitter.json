@@ -1,0 +1,36 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "pem",
+      "camelcase": "PEM",
+      "title": "PEM",
+      "scope": "text.pem",
+      "file-types": [
+        "pem",
+        "key",
+        "crt",
+        "cer",
+        "csr"
+      ],
+      "injection-regex": "^(pem|key|crt|cer|csr)$",
+      "highlights": "queries/highlights.scm",
+      "class-name": "TreeSitterPEM"
+    }
+  ],
+  "metadata": {
+    "version": "0.3.0",
+    "license": "MIT",
+    "description": "PEM grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "ObserverOfTime",
+        "email": "chronobserver@disroot.org"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tree-sitter-grammars/tree-sitter-pem",
+      "funding": "https://github.com/sponsors/ObserverOfTime"
+    }
+  }
+}

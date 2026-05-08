@@ -1,0 +1,42 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "chatito",
+      "path": ".",
+      "scope": "source.chatito",
+      "file-types": [
+        "chatito"
+      ],
+      "injection-regex": "^chatito$",
+      "highlights": "queries/highlights.scm",
+      "tags": "queries/tags.scm"
+    },
+    {
+      "name": "chatl",
+      "path": "extensions/chatl",
+      "scope": "source.chatl",
+      "file-types": [
+        "chatl"
+      ],
+      "injection-regex": "^chatl$",
+      "highlights": "queries/highlights.scm",
+      "tags": "queries/tags.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.5.0",
+    "license": "MIT",
+    "description": "Chatito grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "ObserverOfTime",
+        "email": "chronobserver@disroot.org"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tree-sitter-grammars/tree-sitter-chatito",
+      "funding": "https://github.com/sponsors/ObserverOfTime"
+    }
+  }
+}

@@ -44,6 +44,18 @@ pub const palette = struct {
     pub const markdown = Color.fromHex("#b4bed9");
     pub const gutter = Color.fromHex("#05101f");
     pub const grid_dot = Color.fromHex("#7bd0ff").opacity(0.08);
+    pub const syntax_comment = Color.fromHex("#60769c");
+    pub const syntax_string = Color.fromHex("#e4c77d");
+    pub const syntax_number = Color.fromHex("#ff9b7b");
+    pub const syntax_keyword = Color.fromHex("#88d7ff");
+    pub const syntax_builtin = Color.fromHex("#7fd7d4");
+    pub const syntax_type = Color.fromHex("#8fe0af");
+    pub const syntax_property = Color.fromHex("#c4d2ff");
+    pub const syntax_heading = Color.fromHex("#c6efff");
+    pub const syntax_quote = Color.fromHex("#7dd9c7");
+    pub const syntax_code = Color.fromHex("#f0cf82");
+    pub const syntax_link = Color.fromHex("#91c5ff");
+    pub const syntax_preproc = Color.fromHex("#caa9ff");
 };
 
 pub const monolith_theme = blk: {

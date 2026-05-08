@@ -1,0 +1,30 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "cyberchef",
+      "camelcase": "CyberChef",
+      "title": "CyberChef recipe",
+      "scope": "text.cyberchef",
+      "class-name": "TreeSitterCyberChef",
+      "highlights": "queries/highlights.scm",
+      "file-types": ["chef"],
+      "injection-regex": "^(cyber)?chef$"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "description": "CyberChef recipe grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "ObserverOfTime",
+        "email": "chronobserver@disroot.org",
+        "url": "https://observeroftime.github.io/"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tree-sitter-grammars/tree-sitter-cyberchef",
+      "funding": "https://github.com/sponsors/ObserverOfTime"
+    }
+  }
+}

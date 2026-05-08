@@ -1,0 +1,31 @@
+{
+  "grammars": [
+    {
+      "name": "test",
+      "camelcase": "Test",
+      "title": "TS corpus test",
+      "scope": "text.test",
+      "file-types": [
+        "test"
+      ],
+      "injection-regex": "^test$",
+      "highlights": "queries/test/highlights.scm",
+      "injections": "queries/test/injections.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.3.0",
+    "license": "MIT",
+    "description": "TS corpus test grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "ObserverOfTime",
+        "email": "chronobserver@disroot.org"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tree-sitter-grammars/tree-sitter-test",
+      "funding": "https://github.com/sponsors/ObserverOfTime"
+    }
+  }
+}
