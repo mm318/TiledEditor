@@ -20,6 +20,7 @@ pub fn main(init: std.process.Init) !void {
     std.log.info("SDL version: {f}", .{SDLBackend.getSDLVersion()});
 
     var backend = try SDLBackend.initWindow(.{
+        .io = init.io,
         .allocator = gpa,
         .size = .{ .w = 1450.0, .h = 920.0 },
         .min_size = .{ .w = 900.0, .h = 620.0 },

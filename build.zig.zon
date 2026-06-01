@@ -17,8 +17,8 @@
     // internet connectivity.
     .dependencies = .{
         .dvui = .{
-            .url = "https://github.com/mm318/dvui/archive/4ded0dcf681549b3a1f9ce10154d39acff09f3f8.tar.gz",
-            .hash = "dvui-0.4.0-dev-AQFJmV1a2wBIHEUMKSJXkVb1eWGsMCZGNzR1FIbL-s9I",
+            .url = "https://github.com/mm318/dvui/archive/8f9f07d5958862953cab25d21b60149e4dc39360.tar.gz",
+            .hash = "dvui-0.5.0-dev-AQFJmZAbCAMnc18xo0vzCcY5Ap9okLG9hS_bd6PVEVsO",
         },
         .tree_sitter_language_pack = .{
             .path = "deps/tree-sitter-language-pack",
